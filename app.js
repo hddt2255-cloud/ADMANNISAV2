@@ -1,3 +1,92 @@
+const GOOGLE_SHEETS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx1p4pJlOepzP4zK6tcJ91sKJYJrq0-fBsTl3bl_0h9UmIlpy-R3wdsyvJE6C0caj8/exec';
+
+function syncToGoogleSheetsCloud() {
+  if (!GOOGLE_SHEETS_WEB_APP_URL || GOOGLE_SHEETS_WEB_APP_URL.trim() === '') return;
+
+  const toast = document.getElementById('cloudSyncStatusToast');
+  if (toast) {
+    toast.style.display = 'inline-flex';
+    toast.style.opacity = '1';
+    toast.innerHTML = `<i class="fa-solid fa-rotate fa-spin" style="color:var(--emerald)"></i> <span style="color:#047857">Menyimpan ke Cloud...</span>`;
+    toast.style.background = '#ecfdf5';
+    toast.style.borderColor = '#a7f3d0';
+  }
+
+  fetch(GOOGLE_SHEETS_WEB_APP_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(db)
+  })
+  .then(() => {
+    if (toast) {
+      toast.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#059669"></i> <span style="color:#059669">Tersimpan di Cloud!</span>`;
+      setTimeout(() => {
+        if (toast) toast.style.opacity = '0';
+      }, 2500);
+    }
+  })
+  .catch(err => console.log('Sync to cloud failed', err));
+}
+
+function syncFromGoogleSheetsCloud() {
+  if (!GOOGLE_SHEETS_WEB_APP_URL || GOOGLE_SHEETS_WEB_APP_URL.trim() === '') return;
+
+  const toast = document.getElementById('cloudSyncStatusToast');
+  if (toast) {
+    toast.style.display = 'inline-flex';
+    toast.style.opacity = '1';
+    toast.innerHTML = `<i class="fa-solid fa-spinner fa-spin" style="color:var(--primary)"></i> <span style="color:var(--primary)">Mengambil Data Cloud...</span>`;
+    toast.style.background = '#f1f5f9';
+    toast.style.borderColor = 'var(--border)';
+  }
+
+  fetch(GOOGLE_SHEETS_WEB_APP_URL)
+    .then(res => res.json())
+    .then(cloudDb => {
+      if (cloudDb && typeof cloudDb === 'object') {
+        let hasData = false;
+        Object.keys(cloudDb).forEach(k => {
+          if (Array.isArray(cloudDb[k]) && cloudDb[k].length > 0) {
+            if (db[k] && Array.isArray(db[k]) && db[k].length > 0) {
+              cloudDb[k].forEach((cloudRow, cIdx) => {
+                const localRow = db[k].find(l => l.Nama && cloudRow.Nama && l.Nama.trim().toLowerCase() === cloudRow.Nama.trim().toLowerCase()) || db[k][cIdx];
+                if (localRow) {
+                  if (localRow.Foto && (!cloudRow.Foto || cloudRow.Foto.trim() === '')) {
+                    cloudRow.Foto = localRow.Foto;
+                  }
+                  if (localRow['File Surat'] && (!cloudRow['File Surat'] || cloudRow['File Surat'].trim() === '')) {
+                    cloudRow['File Surat'] = localRow['File Surat'];
+                  }
+                }
+              });
+            }
+            db[k] = cloudDb[k];
+            hasData = true;
+          }
+        });
+        
+        if (hasData) {
+          saveDatabaseLocalOnly();
+          if (typeof renderTable === 'function' && typeof currentSectionId !== 'undefined') {
+            if (currentSectionId === 'dashboard') renderBeritaGrid();
+            else renderTable(currentSectionId);
+          }
+          if (typeof renderDashboardCharts === 'function') renderDashboardCharts();
+          if (typeof updateDashboardStats === 'function') updateDashboardStats();
+        }
+      }
+      if (toast) {
+        toast.innerHTML = `<i class="fa-solid fa-cloud-arrow-down" style="color:var(--primary)"></i> <span style="color:var(--primary)">Cloud Tersinkronisasi</span>`;
+        setTimeout(() => { if(toast) toast.style.opacity = '0'; }, 3000);
+      }
+    })
+    .catch(err => {
+      console.warn('Gagal mengambil data dari Google Sheets:', err);
+      if (toast) toast.style.opacity = '0';
+    });
+}
+
 /* ==========================================================================
    SDIT ANNISA - APP LOGIC & GOOGLE SHEETS CLOUD SYNC (APP.JS)
    ========================================================================== */
@@ -2999,6 +3088,8 @@ function savePengaturan(e) {
   saveDatabaseLocalOnly();
   alert('?? Pengaturan berhasil disimpan!');
 }
+
+
 
 
 
