@@ -122,7 +122,7 @@ let beritaAutoSlideIntervals = [];
 // CONFIG FOR DYNAMIC MASTER TABLES
 const TABLE_CFG = {
   guru: ['Data Guru & Tenaga Kependidikan', ['Nama', 'Jabatan', 'Foto']],
-  siswa: ['Data Siswa SDIT ANNISA', ['Nama', 'Kelas']],
+    siswa: ['Data Siswa SDIT ANNISA', ['Nama', 'NISN', 'Kelas']],
   masuk: ['Data Siswa Masuk / Pindahan', ['Nama', 'Kelas', 'Tanggal Masuk', 'Sekolah Asal', 'Alamat']],
   keluar: ['Data Siswa Keluar / Pindah', ['Nama', 'NISN', 'Kelas', 'Tanggal Keluar', 'Alasan', 'Tujuan Sekolah', 'No Surat', 'Keterangan']],
   lulusan: ['Data Lulusan Alumni', ['Nama', 'Tahun', 'Foto']],
@@ -2987,6 +2987,7 @@ function savePengaturan(e) {
   saveDatabaseLocalOnly();
   alert('?? Pengaturan berhasil disimpan!');
 }
+
 
 
 
