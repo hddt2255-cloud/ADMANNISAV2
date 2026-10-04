@@ -148,12 +148,23 @@ const TEMPLATE_SAMPLES = {
 
 // INITIALIZATION ON DOM READY
 document.addEventListener('DOMContentLoaded', () => {
-  updateCurrentDate();
-  updateAdminUIState();
+  initializeSidebar();
+  
+  if (db.siswa.length === 0) {
+    document.getElementById('importContainer').style.display = 'block';
+  } else {
+    document.getElementById('importContainer').style.display = 'none';
+  }
+  
+  renderTable('siswa');
   updateDashboardStats();
+  renderDashboardCharts();
   renderBeritaGrid();
-  renderProfilView();
-  restoreSavedSidebarState();
+  updateCurrentDate();
+
+  document.getElementById('sidebarToggleIcon').addEventListener('click', toggleSidebarCollapse);
+  
+  syncFromGoogleSheetsCloud();
 });
 
 function getDirectImageSrc(url) {
@@ -337,6 +348,7 @@ function saveDatabaseLocalOnly() {
 function saveDatabase() {
   saveDatabaseLocalOnly();
   updateDashboardStats();
+  syncToGoogleSheetsCloud();
 }
 
 function updateCurrentDate() {
@@ -2987,6 +2999,9 @@ function savePengaturan(e) {
   saveDatabaseLocalOnly();
   alert('?? Pengaturan berhasil disimpan!');
 }
+
+
+
 
 
 
