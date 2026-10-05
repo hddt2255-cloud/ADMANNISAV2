@@ -284,7 +284,42 @@ html, body {
 .top-bar-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+}
+
+/* CLOUD SYNC BADGE & REALTIME STATUS */
+.cloud-sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+  transition: all 0.25s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.cloud-sync-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(5, 150, 105, 0.2);
+}
+
+.cloud-sync-badge.syncing {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.cloud-sync-badge.error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
 }
 
 /* MINIMAL ICON ADMIN BUTTON (HANYA ICON ORANG 👤) */
@@ -1816,6 +1851,15 @@ tr:hover td {
 
   .toolbar input {
     max-width: 100% !important;
+  }
+
+  .cloud-sync-badge {
+    padding: 6px 10px !important;
+    font-size: 11px !important;
+  }
+
+  .cloud-sync-badge .sync-detail {
+    display: none !important;
   }
 }
 

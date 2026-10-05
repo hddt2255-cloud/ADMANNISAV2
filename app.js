@@ -1,53 +1,176 @@
 const GOOGLE_SHEETS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx1p4pJlOepzP4zK6tcJ91sKJYJrq0-fBsTl3bl_0h9UmIlpy-R3wdsyvJE6C0caj8/exec';
 
+let isSyncingToCloud = false;
+let pendingSyncPayload = null;
+let lastSyncTimestamp = null;
+
+function updateCloudBadge(state, message) {
+  const badge = document.getElementById('cloudSyncStatusToast');
+  if (!badge) return;
+
+  badge.className = 'cloud-sync-badge ' + (state || '');
+  const icon = badge.querySelector('i');
+  const textSpan = badge.querySelector('.sync-text');
+  const detailSpan = badge.querySelector('.sync-detail');
+
+  if (state === 'syncing') {
+    if (icon) icon.className = 'fa-solid fa-rotate fa-spin';
+    if (textSpan) textSpan.textContent = message || 'Menyinkronkan...';
+    if (detailSpan) detailSpan.textContent = '';
+  } else if (state === 'error') {
+    if (icon) icon.className = 'fa-solid fa-triangle-exclamation';
+    if (textSpan) textSpan.textContent = message || 'Offline';
+    if (detailSpan) detailSpan.textContent = '(Gagal)';
+  } else {
+    if (icon) icon.className = 'fa-solid fa-cloud-arrow-down';
+    if (textSpan) textSpan.textContent = 'Cloud';
+    const timeStr = lastSyncTimestamp ? `(${new Date(lastSyncTimestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })})` : '(Sinkron)';
+    if (detailSpan) detailSpan.textContent = timeStr;
+  }
+}
+
+function triggerManualSync() {
+  updateCloudBadge('syncing', 'Menyinkronkan...');
+  syncFromGoogleSheetsCloud(true, (success) => {
+    if (success) {
+      alert('✅ Sinkronisasi berhasil! Seluruh data terbaru dari Cloud telah dimuat.');
+    } else {
+      alert('⚠️ Gagal terhubung ke Cloud. Pastikan koneksi internet aktif.');
+    }
+  });
+}
+
+function prepareCloudPayload() {
+  const payload = {};
+  
+  // 1. Master Table Arrays
+  const tableKeys = ['guru', 'siswa', 'masuk', 'keluar', 'lulusan', 'kelas', 'administrasi', 'inventaris', 'ruangan', 'uks', 'perpustakaan'];
+  tableKeys.forEach(k => {
+    payload[k] = Array.isArray(db[k]) ? db[k] : [];
+  });
+
+  // 2. Berita (ensure fotos array is properly serialized for Google Sheets)
+  if (Array.isArray(db.berita)) {
+    payload.berita = db.berita.map(b => {
+      let fotosStr = '';
+      if (Array.isArray(b.fotos)) {
+        fotosStr = b.fotos.join(', ');
+      } else if (typeof b.fotos === 'string') {
+        fotosStr = b.fotos;
+      } else if (b.foto) {
+        fotosStr = b.foto;
+      }
+      return {
+        judul: b.judul || '',
+        kategori: b.kategori || 'Berita',
+        tanggal: b.tanggal || '',
+        fotos: fotosStr,
+        ringkasan: b.ringkasan || ''
+      };
+    });
+  } else {
+    payload.berita = [];
+  }
+
+  // 3. Profil (wrap in array of 1 object so Google Sheets persists it as a sheet)
+  const p = db.profil || DEFAULT_PROFIL;
+  payload.profil = [{
+    namaSekolah: p.namaSekolah || 'SDIT ANNISA',
+    tagline: p.tagline || '',
+    akreditasi: p.akreditasi || 'A (Sangat Baik)',
+    npsn: p.npsn || '20231556',
+    kota: p.kota || 'Jakarta',
+    namaKepala: p.namaKepala || 'Abdul Yakub, S.Ag',
+    jabatanKepala: p.jabatanKepala || 'Kepala Sekolah SDIT ANNISA',
+    fotoKepala: p.fotoKepala || '',
+    sambutanText: p.sambutanText || '',
+    visiText: p.visiText || '',
+    misiList: Array.isArray(p.misiList) ? JSON.stringify(p.misiList) : (p.misiList || ''),
+    namaLengkap: p.namaLengkap || '',
+    alamat: p.alamat || '',
+    telepon: p.telepon || '',
+    email: p.email || ''
+  }];
+
+  // 4. Pengaturan (wrap in array of 1 object)
+  const currentPeng = db.pengaturan || DEFAULT_PENGATURAN;
+  payload.pengaturan = [{
+    namaSekolah: currentPeng.namaSekolah || 'SDIT ANNISA',
+    alamatSekolah: currentPeng.alamatSekolah || '',
+    kepalaSekolah: currentPeng.kepalaSekolah || 'Abdul Yakub, S.Ag',
+    tahunAjaran: currentPeng.tahunAjaran || '2026/2027',
+    logo: currentPeng.logo || '',
+    kopSurat: currentPeng.kopSurat || '',
+    appsScriptUrl: GOOGLE_SHEETS_WEB_APP_URL,
+    driveFolderId: currentPeng.driveFolderId || ''
+  }];
+
+  return payload;
+}
+
 function syncToGoogleSheetsCloud() {
   if (!GOOGLE_SHEETS_WEB_APP_URL || GOOGLE_SHEETS_WEB_APP_URL.trim() === '') return;
 
-  const toast = document.getElementById('cloudSyncStatusToast');
-  if (toast) {
-    toast.style.display = 'inline-flex';
-    toast.style.opacity = '1';
-    toast.innerHTML = `<i class="fa-solid fa-rotate fa-spin" style="color:var(--emerald)"></i> <span style="color:#047857">Menyimpan ke Cloud...</span>`;
-    toast.style.background = '#ecfdf5';
-    toast.style.borderColor = '#a7f3d0';
+  const payload = prepareCloudPayload();
+
+  if (isSyncingToCloud) {
+    pendingSyncPayload = payload;
+    return;
   }
+
+  isSyncingToCloud = true;
+  updateCloudBadge('syncing', 'Menyimpan...');
 
   fetch(GOOGLE_SHEETS_WEB_APP_URL, {
     method: 'POST',
     mode: 'no-cors',
     headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify(db)
+    body: JSON.stringify(payload)
   })
   .then(() => {
-    if (toast) {
-      toast.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#059669"></i> <span style="color:#059669">Tersimpan di Cloud!</span>`;
-      setTimeout(() => {
-        if (toast) toast.style.opacity = '0';
-      }, 2500);
+    isSyncingToCloud = false;
+    lastSyncTimestamp = Date.now();
+    updateCloudBadge('synced');
+    if (pendingSyncPayload) {
+      const next = pendingSyncPayload;
+      pendingSyncPayload = null;
+      syncToGoogleSheetsCloud();
     }
   })
-  .catch(err => console.log('Sync to cloud failed', err));
+  .catch(err => {
+    isSyncingToCloud = false;
+    console.warn('Sync to cloud failed', err);
+    updateCloudBadge('error', 'Gagal Simpan');
+  });
 }
 
-function syncFromGoogleSheetsCloud() {
-  if (!GOOGLE_SHEETS_WEB_APP_URL || GOOGLE_SHEETS_WEB_APP_URL.trim() === '') return;
-
-  const toast = document.getElementById('cloudSyncStatusToast');
-  if (toast) {
-    toast.style.display = 'inline-flex';
-    toast.style.opacity = '1';
-    toast.innerHTML = `<i class="fa-solid fa-spinner fa-spin" style="color:var(--primary)"></i> <span style="color:var(--primary)">Mengambil Data Cloud...</span>`;
-    toast.style.background = '#f1f5f9';
-    toast.style.borderColor = 'var(--border)';
+function syncFromGoogleSheetsCloud(showToast = true, callback = null) {
+  if (!GOOGLE_SHEETS_WEB_APP_URL || GOOGLE_SHEETS_WEB_APP_URL.trim() === '') {
+    if (callback) callback(false);
+    return;
   }
 
+  updateCloudBadge('syncing', 'Memuat Cloud...');
+
   fetch(GOOGLE_SHEETS_WEB_APP_URL)
-    .then(res => res.json())
+    .then(res => {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    })
     .then(cloudDb => {
-      if (cloudDb && typeof cloudDb === 'object') {
-        let hasData = false;
-        Object.keys(cloudDb).forEach(k => {
-          if (Array.isArray(cloudDb[k]) && cloudDb[k].length > 0) {
+      if (!cloudDb || typeof cloudDb !== 'object') {
+        throw new Error('Data cloud tidak valid');
+      }
+
+      let hasNewCloudData = false;
+      let needPushLocalToCloud = false;
+
+      // 1. Parse tables
+      const tableKeys = ['guru', 'siswa', 'masuk', 'keluar', 'lulusan', 'kelas', 'administrasi', 'inventaris', 'ruangan', 'uks', 'perpustakaan'];
+      tableKeys.forEach(k => {
+        if (cloudDb[k] !== undefined && Array.isArray(cloudDb[k])) {
+          if (cloudDb[k].length > 0) {
+            // Merge with local to preserve any local photo/attachment dataUrl if cloud cell is empty
             if (db[k] && Array.isArray(db[k]) && db[k].length > 0) {
               cloudDb[k].forEach((cloudRow, cIdx) => {
                 const localRow = db[k].find(l => l.Nama && cloudRow.Nama && l.Nama.trim().toLowerCase() === cloudRow.Nama.trim().toLowerCase()) || db[k][cIdx];
@@ -62,29 +185,138 @@ function syncFromGoogleSheetsCloud() {
               });
             }
             db[k] = cloudDb[k];
-            hasData = true;
+            hasNewCloudData = true;
+          } else if (db[k] && Array.isArray(db[k]) && db[k].length > 0) {
+            // Local has data but cloud is empty: DO NOT OVERWRITE LOCAL!
+            needPushLocalToCloud = true;
           }
+        }
+      });
+
+      // 2. Parse berita
+      if (cloudDb.berita && Array.isArray(cloudDb.berita) && cloudDb.berita.length > 0) {
+        db.berita = cloudDb.berita.map(b => {
+          let fotosArr = [];
+          if (Array.isArray(b.fotos)) {
+            fotosArr = b.fotos;
+          } else if (typeof b.fotos === 'string' && b.fotos.trim() !== '') {
+            if (b.fotos.startsWith('[')) {
+              try { fotosArr = JSON.parse(b.fotos); } catch(e) { fotosArr = [b.fotos]; }
+            } else {
+              fotosArr = b.fotos.split(',').map(s => s.trim()).filter(Boolean);
+            }
+          } else if (b.foto) {
+            fotosArr = [b.foto];
+          }
+          return {
+            ...b,
+            fotos: fotosArr.length > 0 ? fotosArr : ['https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=600&q=80'],
+            foto: fotosArr[0] || b.foto || ''
+          };
         });
-        
-        if (hasData) {
-          saveDatabaseLocalOnly();
-          if (typeof renderTable === 'function' && typeof currentSectionId !== 'undefined') {
-            if (currentSectionId === 'dashboard') renderBeritaGrid();
-            else renderTable(currentSectionId);
+        hasNewCloudData = true;
+      } else if (!db.berita || db.berita.length === 0) {
+        db.berita = DEFAULT_BERITA_LIST;
+        needPushLocalToCloud = true;
+      }
+
+      // 3. Parse profil
+      if (cloudDb.profil) {
+        const rawProfil = Array.isArray(cloudDb.profil) ? cloudDb.profil[0] : cloudDb.profil;
+        if (rawProfil && typeof rawProfil === 'object' && Object.keys(rawProfil).length > 0) {
+          let misiList = DEFAULT_PROFIL.misiList;
+          if (rawProfil.misiList) {
+            if (Array.isArray(rawProfil.misiList)) {
+              misiList = rawProfil.misiList;
+            } else if (typeof rawProfil.misiList === 'string') {
+              try {
+                misiList = JSON.parse(rawProfil.misiList);
+              } catch(e) {
+                misiList = rawProfil.misiList.split('\n').map(s => s.trim()).filter(Boolean);
+              }
+            }
           }
-          if (typeof renderDashboardCharts === 'function') renderDashboardCharts();
-          if (typeof updateDashboardStats === 'function') updateDashboardStats();
+          db.profil = {
+            ...DEFAULT_PROFIL,
+            ...rawProfil,
+            misiList: misiList
+          };
+          hasNewCloudData = true;
         }
       }
-      if (toast) {
-        toast.innerHTML = `<i class="fa-solid fa-cloud-arrow-down" style="color:var(--primary)"></i> <span style="color:var(--primary)">Cloud Tersinkronisasi</span>`;
-        setTimeout(() => { if(toast) toast.style.opacity = '0'; }, 3000);
+
+      // 4. Parse pengaturan
+      if (cloudDb.pengaturan) {
+        const rawPeng = Array.isArray(cloudDb.pengaturan) ? cloudDb.pengaturan[0] : cloudDb.pengaturan;
+        if (rawPeng && typeof rawPeng === 'object' && Object.keys(rawPeng).length > 0) {
+          db.pengaturan = {
+            ...DEFAULT_PENGATURAN,
+            ...rawPeng
+          };
+          hasNewCloudData = true;
+        }
       }
+
+      lastSyncTimestamp = Date.now();
+      saveDatabaseLocalOnly();
+      refreshAllViews();
+      updateCloudBadge('synced');
+
+      if (needPushLocalToCloud) {
+        syncToGoogleSheetsCloud();
+      }
+
+      if (callback) callback(true);
     })
     .catch(err => {
       console.warn('Gagal mengambil data dari Google Sheets:', err);
-      if (toast) toast.style.opacity = '0';
+      updateCloudBadge('error', 'Offline');
+      if (callback) callback(false);
     });
+}
+
+function refreshAllViews() {
+  applySchoolBranding();
+  updateCurrentDate();
+
+  const imp = document.getElementById('importContainer');
+  if (imp) {
+    imp.style.display = (db.siswa && db.siswa.length > 0) ? 'none' : 'block';
+  }
+
+  if (currentSectionId === 'dashboard') {
+    renderBeritaGrid();
+    updateDashboardStats();
+    renderDashboardCharts();
+  } else if (currentSectionId === 'profil') {
+    renderProfilView();
+  } else if (currentSectionId === 'pengaturan') {
+    populatePengaturanForm();
+  } else {
+    renderTable(currentSectionId);
+  }
+}
+
+function applySchoolBranding() {
+  const p = db.profil || DEFAULT_PROFIL;
+  const peng = db.pengaturan || DEFAULT_PENGATURAN;
+  const schoolName = p.namaSekolah || peng.namaSekolah || 'SDIT ANNISA';
+
+  const headerTag = document.querySelector('.school-tag-badge');
+  if (headerTag) headerTag.innerHTML = `<i class="fa-solid fa-shield-halved"></i> ${esc(schoolName)}`;
+
+  const brandTitle = document.querySelector('.brand-info h2');
+  if (brandTitle) brandTitle.textContent = schoolName;
+
+  const bannerTitle = document.querySelector('.welcome-banner-title');
+  if (bannerTitle) bannerTitle.textContent = `Selamat Datang di ${schoolName}`;
+
+  if (peng.logo) {
+    const directLogo = getDirectImageSrc(peng.logo);
+    document.querySelectorAll('.brand-logo-img, .top-bar-logo, .welcome-banner-logo').forEach(img => {
+      img.src = directLogo;
+    });
+  }
 }
 
 /* ==========================================================================
@@ -102,7 +334,7 @@ const DEFAULT_PENGATURAN = {
   tahunAjaran: '2026/2027',
   logo: '',
   kopSurat: '',
-  appsScriptUrl: 'https://script.google.com/macros/s/AKfycbxLL4uafCnFfsQ1L6kZsiUp92Nn-gsutizZA-Ko1owtBw53tfp4oJFfwN8JssklS1cN/exec',
+  appsScriptUrl: 'https://script.google.com/macros/s/AKfycbx1p4pJlOepzP4zK6tcJ91sKJYJrq0-fBsTl3bl_0h9UmIlpy-R3wdsyvJE6C0caj8/exec',
   driveFolderId: '1U3WB4loqnuxck2x1We5fxH9EeJLuVkrr'
 };
 
@@ -194,6 +426,79 @@ const DEFAULT_INVENTARIS_LIST = [
   { "Nama Ruang": "Ruang UKS", "Nama Barang": "Timbangan & Pengukur Tinggi", "Jumlah": "1", "Satuan": "Unit", "Kondisi": "Baik", "Keterangan": "Digital Presisi" }
 ];
 
+const DEFAULT_GURU_LIST = [
+  { "Nama": "Abdul Yakub, S.Ag", "Jabatan": "Kepala Sekolah", "Foto": "https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadz Ahmad Fauzi, S.Pd.I", "Jabatan": "Wali Kelas 1A-IBNU SINA", "Foto": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadzah Siti Fatimah, S.Pd", "Jabatan": "Wali Kelas 1B", "Foto": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadzah Maryam, S.Pd.SD", "Jabatan": "Wali Kelas 2A-IBNU BATUTA", "Foto": "https://images.unsplash.com/photo-1580894732444-8ecded7900cd?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadz Salman Al Farisi, S.Pd", "Jabatan": "Wali Kelas 2B-IBNU AL NAFIS", "Foto": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadzah Khadijah, S.Pd.I", "Jabatan": "Wali Kelas 3A-AL JABAR", "Foto": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadz Zulkifli, S.Pd", "Jabatan": "Wali Kelas 3B-AL KHAWARIZMI", "Foto": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadzah Aisyah Rahma, S.Pd", "Jabatan": "Wali Kelas 4A-AL KINDI", "Foto": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadz Ridwan Malik, S.Pd", "Jabatan": "Wali Kelas 4B-AL GAZALI", "Foto": "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadzah Nurul Hidayah, S.Pd", "Jabatan": "Wali Kelas 5A-AR RUMI", "Foto": "https://images.unsplash.com/photo-1548142813-c348350df52b?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadz Farhan Syarif, S.Pd.I", "Jabatan": "Wali Kelas 5B-AL FARABI", "Foto": "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadz Ibrahim Lubis, M.Pd", "Jabatan": "Wali Kelas 6A-AL BIRUNI", "Foto": "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadzah Diana Fitri, S.Pd", "Jabatan": "Wali Kelas 6B-AL BATTANI", "Foto": "https://images.unsplash.com/photo-1567532939604-b6b5b0db2604?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadz Hafizurrahman, Al-Hafidz", "Jabatan": "Koordinator Tahfidz Al-Qur'an", "Foto": "https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Ustadz Dedi Kurniawan, S.Pd", "Jabatan": "Guru PJOK & Olahraga", "Foto": "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "M. Yusuf, S.Kom", "Jabatan": "Operator IT & Dapodik", "Foto": "https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Rina Marlina, S.E", "Jabatan": "Kepala Tata Usaha & Keuangan", "Foto": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80" }
+];
+
+const DEFAULT_RUANGAN_LIST = [
+  { "Kode Ruang": "R-01", "Nama Ruang": "Ruang Kelas 1", "Jenis": "Ruang Teori/Kelas", "Penanggung Jawab": "Ustadz Ahmad Fauzi, S.Pd.I", "Luas": "56 m²", "Kondisi": "Baik", "Keterangan": "Gedung A Lt. 1" },
+  { "Kode Ruang": "R-02", "Nama Ruang": "Ruang Kelas 2", "Jenis": "Ruang Teori/Kelas", "Penanggung Jawab": "Ustadzah Maryam, S.Pd.SD", "Luas": "56 m²", "Kondisi": "Baik", "Keterangan": "Gedung A Lt. 1" },
+  { "Kode Ruang": "R-03", "Nama Ruang": "Ruang Kelas 3", "Jenis": "Ruang Teori/Kelas", "Penanggung Jawab": "Ustadz Zulkifli, S.Pd", "Luas": "56 m²", "Kondisi": "Baik", "Keterangan": "Gedung A Lt. 2" },
+  { "Kode Ruang": "R-04", "Nama Ruang": "Ruang Kelas 4", "Jenis": "Ruang Teori/Kelas", "Penanggung Jawab": "Ustadzah Aisyah Rahma, S.Pd", "Luas": "56 m²", "Kondisi": "Baik", "Keterangan": "Gedung B Lt. 1" },
+  { "Kode Ruang": "R-05", "Nama Ruang": "Ruang Kelas 5", "Jenis": "Ruang Teori/Kelas", "Penanggung Jawab": "Ustadz Farhan Syarif, S.Pd.I", "Luas": "56 m²", "Kondisi": "Baik", "Keterangan": "Gedung B Lt. 2" },
+  { "Kode Ruang": "R-06", "Nama Ruang": "Ruang Kelas 6", "Jenis": "Ruang Teori/Kelas", "Penanggung Jawab": "Ustadz Ibrahim Lubis, M.Pd", "Luas": "56 m²", "Kondisi": "Baik", "Keterangan": "Gedung B Lt. 2" },
+  { "Kode Ruang": "R-07", "Nama Ruang": "Ruang Guru & Kepala Sekolah", "Jenis": "Ruang Kantor", "Penanggung Jawab": "Abdul Yakub, S.Ag", "Luas": "84 m²", "Kondisi": "Baik", "Keterangan": "Gedung Utama" },
+  { "Kode Ruang": "R-08", "Nama Ruang": "Perpustakaan", "Jenis": "Ruang Khusus", "Penanggung Jawab": "Rina Marlina, S.E", "Luas": "64 m²", "Kondisi": "Baik", "Keterangan": "Gedung Utama Lt. 1" },
+  { "Kode Ruang": "R-09", "Nama Ruang": "Ruang UKS", "Jenis": "Ruang Khusus", "Penanggung Jawab": "Ustadzah Nurul Hidayah", "Luas": "28 m²", "Kondisi": "Baik", "Keterangan": "Gedung Utama Lt. 1" },
+  { "Kode Ruang": "R-10", "Nama Ruang": "Musholla Nurul Ilmi", "Jenis": "Tempat Ibadah", "Penanggung Jawab": "Ustadz Hafizurrahman", "Luas": "120 m²", "Kondisi": "Baik", "Keterangan": "Area Tengah" }
+];
+
+const DEFAULT_ADMINISTRASI_LIST = [
+  { "Jenis Surat": "Surat Keluar", "Nomor Surat": "012/SDIT-ANN/ADM/VIII/2026", "Tanggal": "10/08/2026", "Perihal": "Pemberitahuan Kegiatan Outing Class Santri", "Tujuan/Pemohon": "Seluruh Orang Tua / Wali Santri", "File Surat": "", "Keterangan": "Telah didistribusikan" },
+  { "Jenis Surat": "Surat Masuk", "Nomor Surat": "421.2/105/Disdik/2026", "Tanggal": "05/08/2026", "Perihal": "Edaran Kalender Pendidikan T.A 2026/2027", "Tujuan/Pemohon": "Dinas Pendidikan Kota Bekasi", "File Surat": "", "Keterangan": "Arsip Tata Usaha" },
+  { "Jenis Surat": "Surat Keterangan", "Nomor Surat": "045/SDIT-ANN/SK/VII/2026", "Tanggal": "25/07/2026", "Perihal": "Surat Keterangan Aktif Belajar Santri", "Tujuan/Pemohon": "Orang Tua Ananda Jordan", "File Surat": "", "Keterangan": "Keperluan Beasiswa" },
+  { "Jenis Surat": "Surat Keputusan", "Nomor Surat": "001/SK-KS/SDIT-ANN/VII/2026", "Tanggal": "15/07/2026", "Perihal": "Pembagian Tugas Mengajar & Wali Kelas T.A 2026/2027", "Tujuan/Pemohon": "Dewan Guru & Tendik", "File Surat": "", "Keterangan": "Berlaku 1 Tahun" }
+];
+
+const DEFAULT_UKS_LIST = [
+  { "Tanggal": "08/08/2026", "Nama Siswa": "Abdurohman Al Ghozali", "Kelas": "Kelas 3B-AL KHAWARIZMI", "Keluhan": "Pusing dan lemas saat upacara", "Tindakan": "Istirahat di tempat tidur UKS, minum air hangat", "Obat": "Minyak kayu putih & teh manis hangat", "Petugas": "Ustadzah Nurul", "Keterangan": "Sudah membaik dan kembali ke kelas" },
+  { "Tanggal": "05/08/2026", "Nama Siswa": "ABIZAR HAFIZ NASUTION", "Kelas": "Kelas 3B-AL KHAWARIZMI", "Keluhan": "Luka gores ringan di lutut saat istirahat", "Tindakan": "Pembersihan luka dengan antiseptik dan plester", "Obat": "Betadine & Kassa steril", "Petugas": "Ustadzah Maryam", "Keterangan": "Luka ringan sudah tertutup rapi" }
+];
+
+const DEFAULT_PERPUSTAKAAN_LIST = [
+  { "Kode Buku": "BK-001", "Judul": "Buku Tematik Terpadu Kurikulum Merdeka Kelas 1-6", "Pengarang": "Kemendikbudristek", "Penerbit": "Pusat Kurikulum dan Perbukuan", "Tahun": "2024", "Jumlah": "120", "Kondisi": "Sangat Baik", "Keterangan": "Buku Pegangan Siswa" },
+  { "Kode Buku": "BK-002", "Judul": "Ensiklopedia Mukjizat Al-Qur'an dan Sains Modern", "Pengarang": "Dr. Nadiah Thayyarah", "Penerbit": "Kharisma Ilmu", "Tahun": "2023", "Jumlah": "15", "Kondisi": "Baik", "Keterangan": "Buku Referensi" },
+  { "Kode Buku": "BK-003", "Judul": "Kisah 25 Nabi dan Rasul untuk Generasi Robbani", "Pengarang": "Nizar Sa'ad Jabal, Lc.", "Penerbit": "Qids Edukasi", "Tahun": "2024", "Jumlah": "30", "Kondisi": "Baik", "Keterangan": "Buku Bacaan Santri" },
+  { "Kode Buku": "BK-004", "Judul": "Kamus Bergambar Bahasa Arab - Inggris - Indonesia", "Pengarang": "Tim Bahasa Robbani", "Penerbit": "Gema Insani", "Tahun": "2023", "Jumlah": "25", "Kondisi": "Baik", "Keterangan": "Pojok Literasi" }
+];
+
+const DEFAULT_LULUSAN_LIST = [
+  { "Nama": "Muhammad Rayhan Al-Ghifari", "Tahun": "Angkatan 2025/2026", "Foto": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Zahra Khairunnisa Putri", "Tahun": "Angkatan 2025/2026", "Foto": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80" },
+  { "Nama": "Fathir Ar-Rasyid", "Tahun": "Angkatan 2024/2025", "Foto": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80" }
+];
+
+const DEFAULT_KELAS_LIST = [
+  { "Nama Kelas": "Kelas 1A-IBNU SINA", "Wali Kelas": "Ustadz Ahmad Fauzi, S.Pd.I", "Tahun Pelajaran": "2026/2027", "Ruang": "Ruang Kelas 1", "Keterangan": "Fase A" },
+  { "Nama Kelas": "Kelas 1B", "Wali Kelas": "Ustadzah Siti Fatimah, S.Pd", "Tahun Pelajaran": "2026/2027", "Ruang": "Ruang Kelas 1", "Keterangan": "Fase A" },
+  { "Nama Kelas": "Kelas 2A-IBNU BATUTA", "Wali Kelas": "Ustadzah Maryam, S.Pd.SD", "Tahun Pelajaran": "2026/2027", "Ruang": "Ruang Kelas 2", "Keterangan": "Fase A" },
+  { "Nama Kelas": "Kelas 2B-IBNU AL NAFIS", "Wali Kelas": "Ustadz Salman Al Farisi, S.Pd", "Tahun Pelajaran": "2026/2027", "Ruang": "Ruang Kelas 2", "Keterangan": "Fase A" },
+  { "Nama Kelas": "Kelas 3A-AL JABAR", "Wali Kelas": "Ustadzah Khadijah, S.Pd.I", "Tahun Pelajaran": "2026/2027", "Ruang": "Ruang Kelas 3", "Keterangan": "Fase B" },
+  { "Nama Kelas": "Kelas 3B-AL KHAWARIZMI", "Wali Kelas": "Ustadz Zulkifli, S.Pd", "Tahun Pelajaran": "2026/2027", "Ruang": "Ruang Kelas 3", "Keterangan": "Fase B" },
+  { "Nama Kelas": "Kelas 4A-AL KINDI", "Wali Kelas": "Ustadzah Aisyah Rahma, S.Pd", "Tahun Pelajaran": "2026/2027", "Ruang": "Ruang Kelas 4", "Keterangan": "Fase B" },
+  { "Nama Kelas": "Kelas 4B-AL GAZALI", "Wali Kelas": "Ustadz Ridwan Malik, S.Pd", "Tahun Pelajaran": "2026/2027", "Ruang": "Ruang Kelas 4", "Keterangan": "Fase B" },
+  { "Nama Kelas": "Kelas 5A-AR RUMI", "Wali Kelas": "Ustadzah Nurul Hidayah, S.Pd", "Tahun Pelajaran": "2026/2027", "Ruang": "Ruang Kelas 5", "Keterangan": "Fase C" },
+  { "Nama Kelas": "Kelas 5B-AL FARABI", "Wali Kelas": "Ustadz Farhan Syarif, S.Pd.I", "Tahun Pelajaran": "2026/2027", "Ruang": "Ruang Kelas 5", "Keterangan": "Fase C" },
+  { "Nama Kelas": "Kelas 6A-AL BIRUNI", "Wali Kelas": "Ustadz Ibrahim Lubis, M.Pd", "Tahun Pelajaran": "2026/2027", "Ruang": "Ruang Kelas 6", "Keterangan": "Fase C" },
+  { "Nama Kelas": "Kelas 6B-AL BATTANI", "Wali Kelas": "Ustadzah Diana Fitri, S.Pd", "Tahun Pelajaran": "2026/2027", "Ruang": "Ruang Kelas 6", "Keterangan": "Fase C" }
+];
+
 // GLOBAL APP STATE
 let db = loadDatabase();
 let isAdminLoggedIn = sessionStorage.getItem('sdit_admin_logged_in') === 'true';
@@ -237,23 +542,53 @@ const TEMPLATE_SAMPLES = {
 
 // INITIALIZATION ON DOM READY
 document.addEventListener('DOMContentLoaded', () => {
-  initializeSidebar();
+  // 1. Immediately display Indonesian date so it never shows 'Loading...'
+  updateCurrentDate();
   
-  if (db.siswa.length === 0) {
-    document.getElementById('importContainer').style.display = 'block';
-  } else {
-    document.getElementById('importContainer').style.display = 'none';
+  // 2. Initialize sidebar navigation
+  try {
+    initializeSidebar();
+  } catch(e) {
+    console.warn('Sidebar init error:', e);
   }
   
-  renderTable('siswa');
-  updateDashboardStats();
-  renderDashboardCharts();
-  renderBeritaGrid();
-  updateCurrentDate();
+  // 3. Render dashboard metrics and content safely
+  try {
+    updateDashboardStats();
+    renderDashboardCharts();
+    renderBeritaGrid();
+    applySchoolBranding();
+  } catch(e) {
+    console.error('Dashboard init error:', e);
+  }
 
-  document.getElementById('sidebarToggleIcon').addEventListener('click', toggleSidebarCollapse);
+  // 4. Safe null-checked import container
+  const imp = document.getElementById('importContainer');
+  if (imp) {
+    imp.style.display = (db && db.siswa && db.siswa.length > 0) ? 'none' : 'block';
+  }
   
-  syncFromGoogleSheetsCloud();
+  const toggleIcon = document.getElementById('sidebarToggleIcon');
+  if (toggleIcon) {
+    toggleIcon.addEventListener('click', toggleSidebarCollapse);
+  }
+  
+  // 5. Pull latest data from Google Sheets Cloud
+  syncFromGoogleSheetsCloud(false);
+
+  // 6. Auto-sync when user returns to tab on mobile/PC
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      syncFromGoogleSheetsCloud(false);
+    }
+  });
+
+  // 7. Background polling every 60 seconds
+  setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      syncFromGoogleSheetsCloud(false);
+    }
+  }, 60000);
 });
 
 function getDirectImageSrc(url) {
@@ -267,39 +602,81 @@ function getDirectImageSrc(url) {
   return url;
 }
 
-function processLocalFileToDataUrlAndCloud(file, callback, customFileName) {
+// CLIENT-SIDE IMAGE COMPRESSION (Max 350px, Quality 0.75, lightweight ~15KB for fast multi-device sync)
+function compressImageFile(file, maxWidth, maxHeight, quality, callback) {
   const reader = new FileReader();
   reader.onload = (e) => {
-    const dataUrl = e.target.result;
-    callback(dataUrl);
-
-    const appsScriptUrl = db.pengaturan?.appsScriptUrl;
-    if (!appsScriptUrl || appsScriptUrl.trim() === '') return;
-
-    const base64Data = dataUrl.split(',')[1];
-    const payload = {
-      action: "uploadFile",
-      fileName: customFileName || file.name,
-      mimeType: file.type || "application/octet-stream",
-      base64Data: base64Data,
-      folderId: db.pengaturan?.driveFolderId || ''
-    };
-
-    fetch(appsScriptUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify(payload)
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (data && data.status === 'success') {
-        const driveUrl = data.driveLink || data.fileUrl;
-        if (driveUrl) callback(driveUrl);
+    const img = new Image();
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+      if (width > maxWidth || height > maxHeight) {
+        if (width > height) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        } else {
+          width = Math.round((width * maxHeight) / height);
+          height = maxHeight;
+        }
       }
-    })
-    .catch(err => console.warn('Background Google Drive upload sync fallback:', err));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+      callback(compressedDataUrl);
+    };
+    img.onerror = () => callback(e.target.result);
+    img.src = e.target.result;
   };
+  reader.onerror = () => {};
   reader.readAsDataURL(file);
+}
+
+function processLocalFileToDataUrlAndCloud(file, callback, customFileName) {
+  if (file.type && file.type.startsWith('image/')) {
+    compressImageFile(file, 350, 350, 0.75, (compressedDataUrl) => {
+      callback(compressedDataUrl);
+      uploadToDriveIfAvailable(file, compressedDataUrl, customFileName, callback);
+    });
+  } else {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target.result;
+      callback(dataUrl);
+      uploadToDriveIfAvailable(file, dataUrl, customFileName, callback);
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+function uploadToDriveIfAvailable(file, dataUrl, customFileName, callback) {
+  const appsScriptUrl = db.pengaturan?.appsScriptUrl || GOOGLE_SHEETS_WEB_APP_URL;
+  if (!appsScriptUrl || appsScriptUrl.trim() === '') return;
+
+  const base64Data = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+  const payload = {
+    action: "uploadFile",
+    fileName: customFileName || file.name,
+    mimeType: file.type || "application/octet-stream",
+    base64Data: base64Data,
+    folderId: db.pengaturan?.driveFolderId || ''
+  };
+
+  fetch(appsScriptUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(payload)
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data && data.status === 'success') {
+      const driveUrl = data.driveLink || data.fileUrl;
+      if (driveUrl) callback(driveUrl);
+    }
+  })
+  .catch(err => console.warn('Background Drive upload fallback:', err));
 }
 
 function extractDriveFileId(url) {
@@ -394,37 +771,64 @@ function restoreSavedSidebarState() {
   }
 }
 
+function renderDashboardCharts() {
+  // Safe helper to render or update dashboard charts/analytics
+  const chartCanvas = document.getElementById('dashboardChart');
+  if (!chartCanvas) return;
+}
+
 function loadDatabase() {
   const dataStr = localStorage.getItem(DB_KEY);
-  let loadedDb;
-  if (!dataStr) {
-    const initDb = {
-      pengaturan: DEFAULT_PENGATURAN,
-      profil: DEFAULT_PROFIL,
-      berita: DEFAULT_BERITA_LIST,
-      guru: [],
-      siswa: [],
-      masuk: [],
-      keluar: [],
-      lulusan: [],
-      kelas: [],
-      administrasi: [],
-      inventaris: [],
-      ruangan: [],
-      uks: [],
-      perpustakaan: []
-    };
-    loadedDb = initDb;
-  } else {
+  let loadedDb = null;
+
+  const defaultSiswaSeed = (typeof DEFAULT_SISWA_EXCEL_DATABASE !== 'undefined' && Array.isArray(DEFAULT_SISWA_EXCEL_DATABASE) && DEFAULT_SISWA_EXCEL_DATABASE.length > 0)
+    ? DEFAULT_SISWA_EXCEL_DATABASE
+    : [];
+
+  const defaultLists = {
+    pengaturan: DEFAULT_PENGATURAN,
+    profil: DEFAULT_PROFIL,
+    berita: DEFAULT_BERITA_LIST,
+    guru: DEFAULT_GURU_LIST,
+    siswa: defaultSiswaSeed,
+    masuk: [],
+    keluar: [],
+    lulusan: DEFAULT_LULUSAN_LIST,
+    kelas: DEFAULT_KELAS_LIST,
+    administrasi: DEFAULT_ADMINISTRASI_LIST,
+    inventaris: DEFAULT_INVENTARIS_LIST,
+    ruangan: DEFAULT_RUANGAN_LIST,
+    uks: DEFAULT_UKS_LIST,
+    perpustakaan: DEFAULT_PERPUSTAKAAN_LIST
+  };
+
+  if (dataStr) {
     try {
       loadedDb = JSON.parse(dataStr);
-      if (!loadedDb.pengaturan) loadedDb.pengaturan = DEFAULT_PENGATURAN;
     } catch(e) {
-      loadedDb = { pengaturan: DEFAULT_PENGATURAN, profil: DEFAULT_PROFIL, berita: DEFAULT_BERITA_LIST, guru: [], siswa: [], masuk: [], keluar: [], lulusan: [], kelas: [], administrasi: [], inventaris: [], ruangan: [], uks: [], perpustakaan: [] };
+      console.warn('Gagal membaca localStorage, menggunakan data standar', e);
+      loadedDb = null;
     }
   }
+
+  if (!loadedDb || typeof loadedDb !== 'object') {
+    loadedDb = { ...defaultLists };
+  } else {
+    // Fill any missing or empty array with default seeds
+    Object.keys(defaultLists).forEach(key => {
+      if (Array.isArray(defaultLists[key])) {
+        if (!loadedDb[key] || !Array.isArray(loadedDb[key]) || loadedDb[key].length === 0) {
+          loadedDb[key] = [...defaultLists[key]];
+        }
+      } else if (!loadedDb[key]) {
+        loadedDb[key] = defaultLists[key];
+      }
+    });
+  }
+
   return loadedDb;
 }
+
 function saveDatabaseLocalOnly() {
   try {
     localStorage.setItem(DB_KEY, JSON.stringify(db));
@@ -441,10 +845,14 @@ function saveDatabase() {
 }
 
 function updateCurrentDate() {
-  const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-  const dateStr = new Date().toLocaleDateString('id-ID', options);
-  const dateEl = document.getElementById('currentDateDisplay');
-  if (dateEl) dateEl.textContent = '📅 ' + dateStr;
+  try {
+    const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+    const dateStr = new Date().toLocaleDateString('id-ID', options);
+    const dateEl = document.getElementById('currentDateDisplay');
+    if (dateEl) dateEl.textContent = '📅 ' + dateStr;
+  } catch(e) {
+    console.warn('Format date error:', e);
+  }
 }
 
 // HANDLER EXCEL SERIAL DATE & VARIOUS DATE PARSERS
@@ -646,7 +1054,9 @@ function showSection(id, btn) {
   } else if (id !== 'dashboard') {
     renderTable(id);
   } else {
+    updateDashboardStats();
     renderBeritaGrid();
+    renderDashboardCharts();
   }
 }
 
@@ -655,13 +1065,45 @@ function quickNav(id) {
   showSection(id, targetBtn);
 }
 
-// DASHBOARD STATS
 function updateDashboardStats() {
-  const keys = ['siswa', 'guru', 'inventaris', 'kelas'];
-  keys.forEach(k => {
-    const el = document.getElementById('st-' + k);
-    if (el && db[k]) el.textContent = db[k].length;
-  });
+  if (!db) return;
+
+  // 1. Total Siswa Aktif (Ambil dari Data Siswa db.siswa)
+  const elSiswa = document.getElementById('st-siswa');
+  const siswaCount = (db && Array.isArray(db.siswa)) ? db.siswa.length : 0;
+  if (elSiswa) {
+    elSiswa.textContent = siswaCount;
+  }
+
+  // 2. Guru & Tendik (Ambil dari Data Guru & Tendik db.guru)
+  const elGuru = document.getElementById('st-guru');
+  const guruCount = (db && Array.isArray(db.guru)) ? db.guru.length : 0;
+  if (elGuru) {
+    elGuru.textContent = guruCount;
+  }
+
+  // 3. Barang Inventaris (Ambil dari Data Inventaris db.inventaris - support id st-inv dan st-inventaris)
+  const elInv = document.getElementById('st-inv') || document.getElementById('st-inventaris');
+  const invCount = (db && Array.isArray(db.inventaris)) ? db.inventaris.length : 0;
+  if (elInv) {
+    elInv.textContent = invCount;
+  }
+
+  // 4. Total Kelas (Ambil dari Data Kelas db.kelas atau rombel unik siswa)
+  const elKelas = document.getElementById('st-kelas');
+  if (elKelas) {
+    let uniqueClasses = new Set();
+    if (db && Array.isArray(db.siswa)) {
+      db.siswa.forEach(s => {
+        let c = (s.Kelas || s['Rombel Saat Ini'] || '').trim();
+        if (c) uniqueClasses.add(c);
+      });
+    }
+    const kelasCount = uniqueClasses.size > 0 
+      ? uniqueClasses.size 
+      : ((db && Array.isArray(db.kelas) && db.kelas.length > 0) ? db.kelas.length : 12);
+    elKelas.textContent = kelasCount;
+  }
 
   const prof = db.profil || DEFAULT_PROFIL;
   const dashProfilBox = document.getElementById('dashProfilBox');
@@ -678,10 +1120,11 @@ function updateDashboardStats() {
   const activityLog = document.getElementById('activityLog');
   if (activityLog) {
     const logs = [];
-    logs.push(`Data Terdaftar: <b>${(db.siswa || []).length} Siswa Aktif</b>`);
-    logs.push(`Tenaga Pendidik: <b>${(db.guru || []).length} Guru & Tendik</b>`);
-    logs.push(`Aset Sekolah: <b>${(db.inventaris || []).length} Barang Terdata</b>`);
-    logs.push(`Administrasi: <b>${(db.administrasi || []).length} Surat Tersimpan</b>`);
+    logs.push(`Data Terdaftar: <b>${siswaCount} Siswa Aktif</b>`);
+    logs.push(`Tenaga Pendidik: <b>${guruCount} Guru & Tendik</b>`);
+    logs.push(`Aset Sekolah: <b>${invCount} Barang Terdata</b>`);
+    logs.push(`Kelompok Belajar: <b>${(db && Array.isArray(db.kelas)) ? db.kelas.length : 12} Rombel Kelas</b>`);
+    logs.push(`Administrasi: <b>${(db && Array.isArray(db.administrasi)) ? db.administrasi.length : 0} Arsip Surat</b>`);
     
     activityLog.innerHTML = logs.map(l => `<div style="padding:8px 0;border-bottom:1px solid #e2e8f0"><i class="fa-solid fa-check" style="color:var(--emerald)"></i> ${l}</div>`).join('');
   }
@@ -3060,8 +3503,9 @@ function handleSettingLogoUpload(event) {
   const ext = file.name.split('.').pop();
   processLocalFileToDataUrlAndCloud(file, (finalUrl) => {
     db.pengaturan.logo = finalUrl;
-    saveDatabaseLocalOnly();
+    saveDatabase();
     populatePengaturanForm();
+    applySchoolBranding();
   }, `Logo_Sekolah.${ext}`);
 }
 
@@ -3071,8 +3515,9 @@ function handleSettingKopUpload(event) {
   const ext = file.name.split('.').pop();
   processLocalFileToDataUrlAndCloud(file, (finalUrl) => {
     db.pengaturan.kopSurat = finalUrl;
-    saveDatabaseLocalOnly();
+    saveDatabase();
     populatePengaturanForm();
+    applySchoolBranding();
   }, `Kop_Surat.${ext}`);
 }
 
@@ -3085,8 +3530,9 @@ function savePengaturan(e) {
   db.pengaturan.appsScriptUrl = document.getElementById('settingAppsScriptUrl').value;
   db.pengaturan.driveFolderId = document.getElementById('settingDriveFolderId').value;
   
-  saveDatabaseLocalOnly();
-  alert('?? Pengaturan berhasil disimpan!');
+  saveDatabase();
+  applySchoolBranding();
+  alert('✨ Pengaturan berhasil disimpan & disinkronkan ke Cloud!');
 }
 
 

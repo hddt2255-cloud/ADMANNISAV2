@@ -75,12 +75,17 @@
 
         <img src="logo_annisa.png" alt="Logo SDIT ANNISA" class="top-bar-logo">
         <span class="school-tag-badge"><i class="fa-solid fa-shield-halved"></i> SDIT ANNISA</span>
-        <span class="page-subtitle date-text-hide" id="currentDateDisplay">Loading...</span>
+        <span class="page-subtitle date-text-hide" id="currentDateDisplay">📅 Memuat Tanggal...</span>
       </div>
 
       <div class="top-bar-right">
         
-        </span>
+        <!-- TOMBOL STATUS SINKRONISASI CLOUD -->
+        <button type="button" id="cloudSyncStatusToast" class="cloud-sync-badge" onclick="triggerManualSync()" title="Klik untuk sinkronisasi data cloud sekarang">
+          <i class="fa-solid fa-cloud"></i>
+          <span class="sync-text">Cloud Aktif</span>
+          <span class="sync-detail">(Sinkron)</span>
+        </button>
 
         <!-- TOMBOL ICON ORANG LOGIN ADMIN (HANYA ICON SAJA) -->
         <button class="btn-admin-icon-only" id="btnAdminIcon" onclick="handleAdminIconClick()" title="Login / Keluar Admin">
@@ -121,22 +126,22 @@
       <div class="cards">
         <div class="card">
           <div class="card-title">Total Siswa Aktif <i class="fa-solid fa-user-graduate" style="color:var(--primary)"></i></div>
-          <div class="stat-number" id="st-siswa">0</div>
+          <div class="stat-number" id="st-siswa">233</div>
           <span class="stat-badge">Tahun Ajaran Aktif</span>
         </div>
         <div class="card">
           <div class="card-title">Guru & Tendik <i class="fa-solid fa-user-tie" style="color:var(--emerald)"></i></div>
-          <div class="stat-number" id="st-guru" style="color:var(--emerald)">0</div>
+          <div class="stat-number" id="st-guru" style="color:var(--emerald)">17</div>
           <span class="stat-badge" style="background:#ecfdf5;color:#047857">SDM Pengajar</span>
         </div>
         <div class="card">
           <div class="card-title">Barang Inventaris <i class="fa-solid fa-boxes-stacked" style="color:var(--gold)"></i></div>
-          <div class="stat-number" id="st-inv" style="color:var(--gold)">0</div>
+          <div class="stat-number" id="st-inv" style="color:var(--gold)">19</div>
           <span class="stat-badge" style="background:#fffbeb;color:#b45309">Barang Tercatat</span>
         </div>
         <div class="card">
           <div class="card-title">Total Kelas <i class="fa-solid fa-layer-group" style="color:#7c3aed"></i></div>
-          <div class="stat-number" id="st-kelas" style="color:#7c3aed">0</div>
+          <div class="stat-number" id="st-kelas" style="color:#7c3aed">12</div>
           <span class="stat-badge" style="background:#f3e8ff;color:#6b21a8">Ruang Belajar</span>
         </div>
       </div>
@@ -633,7 +638,8 @@
   </div>
 
   <!-- App Script -->
-  <script src="app.js?v=14"></script>
+  <script src="data_siswa_init.js"></script>
+  <script src="app.js?v=20"></script>
 </body>
 </html>
 
