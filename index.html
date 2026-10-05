@@ -15,18 +15,23 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=21">
 </head>
 <body>
 
   <!-- SIDEBAR NAVIGATION -->
   <aside class="sidebar">
     <div class="brand">
-      <img src="logo_annisa.png" alt="Logo Resmi SDIT ANNISA" class="brand-logo-img">
-      <div class="brand-info">
-        <h2>SDIT ANNISA</h2>
-        <small>Administrasi & Portal Terpadu</small>
+      <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;">
+        <img src="logo_annisa.png" alt="Logo Resmi SDIT ANNISA" class="brand-logo-img">
+        <div class="brand-info">
+          <h2>SDIT ANNISA</h2>
+          <small>Administrasi & Portal Terpadu</small>
+        </div>
       </div>
+      <button type="button" class="sidebar-close-mobile-btn" onclick="closeMobileSidebar(event)" title="Tutup Menu Sidebar" aria-label="Tutup Menu">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
     </div>
 
     <div class="nav-section-title">Menu Utama</div>
@@ -69,8 +74,8 @@
     <header class="top-bar-header">
       <div class="top-bar-left">
         <!-- TOMBOL ICON STRIP 3 (FA-BARS) TOGGLE MENU SIDEBAR -->
-        <button class="sidebar-toggle-btn" id="sidebarToggleBtn" onclick="toggleSidebarCollapse()" title="Sembunyikan / Tampilkan Menu Sidebar">
-          <i class="fa-solid fa-bars" id="sidebarToggleIcon"></i>
+        <button type="button" class="sidebar-toggle-btn" id="sidebarToggleBtn" onclick="toggleSidebarCollapse(event)" title="Sembunyikan / Tampilkan Menu Sidebar" aria-label="Toggle Menu Sidebar">
+          <i class="fa-solid fa-bars" id="sidebarToggleIcon" style="pointer-events: none;"></i>
         </button>
 
         <img src="logo_annisa.png" alt="Logo SDIT ANNISA" class="top-bar-logo">
@@ -639,7 +644,7 @@
 
   <!-- App Script -->
   <script src="data_siswa_init.js"></script>
-  <script src="app.js?v=20"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>
 

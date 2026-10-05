@@ -243,28 +243,69 @@ html, body {
   object-fit: contain;
 }
 
-/* TOMBOL TOGGLE SIDEBAR DENGAN ICON SEGITIGA PRESISI (◀ / ▶) */
+/* TOMBOL TOGGLE SIDEBAR DENGAN ICON STRIP 3 */
 .sidebar-toggle-btn {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 12px;
   background: #eff6ff;
   color: var(--primary);
   border: 1px solid #bfdbfe;
   cursor: pointer;
-  font-size: 16px;
-  display: grid;
-  place-items: center;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 6px rgba(30, 64, 175, 0.1);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(30, 64, 175, 0.12);
   flex-shrink: 0;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .sidebar-toggle-btn:hover {
   background: var(--primary);
   color: #ffffff;
-  transform: scale(1.08);
+  transform: scale(1.05);
   box-shadow: 0 4px 12px rgba(30, 64, 175, 0.25);
+}
+
+.sidebar-toggle-btn:active {
+  transform: scale(0.92);
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.sidebar-toggle-btn i {
+  pointer-events: none;
+}
+
+.sidebar-close-mobile-btn {
+  display: none;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 10px;
+  font-size: 16px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: all 0.2s ease;
+}
+
+.sidebar-close-mobile-btn:active {
+  background: #ef4444;
+  transform: scale(0.92);
 }
 
 .school-tag-badge {
@@ -1649,9 +1690,12 @@ tr:hover td {
   inset: 0;
   background: rgba(15, 23, 42, 0.65);
   backdrop-filter: blur(4px);
-  z-index: 999;
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 9998;
   display: block;
-  animation: fadeIn 0.25s ease;
+  animation: fadeIn 0.2s ease;
+  touch-action: manipulation;
+  cursor: pointer;
 }
 
 @keyframes fadeIn {
@@ -1666,23 +1710,32 @@ tr:hover td {
     width: 100vw !important;
   }
 
+  .sidebar-close-mobile-btn {
+    display: flex !important;
+  }
+
   /* SIDEBAR AUTO-HIDE SECARA DEFAULT DI HP */
   .sidebar {
     position: fixed;
     left: 0;
     top: 0;
     bottom: 0;
-    width: 270px !important;
-    padding: 20px 14px !important;
-    z-index: 1000;
+    width: 280px !important;
+    max-width: 82vw !important;
+    padding: 20px 14px 40px !important;
+    z-index: 9999;
     transform: translateX(-100%);
     box-shadow: none;
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
-  /* KETIKA TOMBOL SEGITIGA DI-TAP PADA HP, SIDEBAR SLIDE IN OVERLAY HALUS */
+  /* KETIKA TOMBOL DI-TAP PADA HP, SIDEBAR SLIDE IN OVERLAY HALUS */
   .sidebar.mobile-open {
     transform: translateX(0) !important;
-    box-shadow: 10px 0 35px rgba(0, 0, 0, 0.5) !important;
+    box-shadow: 12px 0 40px rgba(0, 0, 0, 0.5) !important;
   }
 
   /* KONTEN UTAMA MENYATU RAPI TANPA MARGIN SIDEBAR DI HP & ZERO SIDE SCROLL */

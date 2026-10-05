@@ -568,11 +568,6 @@ document.addEventListener('DOMContentLoaded', () => {
     imp.style.display = (db && db.siswa && db.siswa.length > 0) ? 'none' : 'block';
   }
   
-  const toggleIcon = document.getElementById('sidebarToggleIcon');
-  if (toggleIcon) {
-    toggleIcon.addEventListener('click', toggleSidebarCollapse);
-  }
-  
   // 5. Pull latest data from Google Sheets Cloud
   syncFromGoogleSheetsCloud(false);
 
@@ -714,12 +709,24 @@ function processLocalFileToDataUrl(file, callback) {
 }
 
 // TOGGLE COLLAPSE & AUTO-HIDE SIDEBAR MENU DENGAN ICON STRIP 3 (FA-BARS)
-function toggleSidebarCollapse() {
+let isTogglingSidebar = false;
+
+function toggleSidebarCollapse(e) {
+  if (e) {
+    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+    if (typeof e.preventDefault === 'function') e.preventDefault();
+  }
+
+  // Prevent duplicate execution within 200ms (mobile touch/click debounce)
+  if (isTogglingSidebar) return;
+  isTogglingSidebar = true;
+  setTimeout(() => { isTogglingSidebar = false; }, 200);
+
   const sidebar = document.querySelector('.sidebar');
   const main = document.querySelector('.main');
   const icon = document.getElementById('sidebarToggleIcon');
 
-  if (!sidebar || !main) return;
+  if (!sidebar) return;
 
   const isMobile = window.innerWidth <= 768;
 
@@ -731,15 +738,19 @@ function toggleSidebarCollapse() {
       if (!backdrop) {
         backdrop = document.createElement('div');
         backdrop.className = 'sidebar-mobile-backdrop';
-        backdrop.onclick = () => toggleSidebarCollapse();
+        backdrop.onclick = (evt) => {
+          if (evt && typeof evt.stopPropagation === 'function') evt.stopPropagation();
+          closeMobileSidebar();
+        };
         document.body.appendChild(backdrop);
       }
       if (icon) icon.className = 'fa-solid fa-xmark';
+      document.body.style.overflow = 'hidden';
     } else {
-      if (backdrop) backdrop.remove();
-      if (icon) icon.className = 'fa-solid fa-bars';
+      closeMobileSidebar();
     }
   } else {
+    if (!main) return;
     const isCollapsed = sidebar.classList.toggle('collapsed');
     main.classList.toggle('expanded', isCollapsed);
 
@@ -749,6 +760,18 @@ function toggleSidebarCollapse() {
 
     localStorage.setItem('sdit_sidebar_collapsed', isCollapsed ? 'true' : 'false');
   }
+}
+
+function closeMobileSidebar(e) {
+  if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+  const sidebar = document.querySelector('.sidebar');
+  const backdrop = document.querySelector('.sidebar-mobile-backdrop');
+  const icon = document.getElementById('sidebarToggleIcon');
+
+  if (sidebar) sidebar.classList.remove('mobile-open');
+  if (backdrop) backdrop.remove();
+  if (icon) icon.className = 'fa-solid fa-bars';
+  document.body.style.overflow = '';
 }
 
 function restoreSavedSidebarState() {
