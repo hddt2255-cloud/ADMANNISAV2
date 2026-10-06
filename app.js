@@ -1,6 +1,9 @@
 const GOOGLE_SHEETS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx1p4pJlOepzP4zK6tcJ91sKJYJrq0-fBsTl3bl_0h9UmIlpy-R3wdsyvJE6C0caj8/exec';
+const OLD_APPS_SCRIPT_URL_PATTERN = 'AKfycbyN05PIWa01Ey0jLnkNRyIdg4i3HJOCxKfMPhQ8fbpdYm6wt8kKYlx1KtvTnsgdCxol';
 
 let isSyncingToCloud = false;
+let isFetchingFromCloud = false;
+let lastCloudFetchTime = 0;
 let pendingSyncPayload = null;
 let lastSyncTimestamp = null;
 
@@ -158,6 +161,20 @@ function syncFromGoogleSheetsCloud(showToast = true, callback = null) {
     return;
   }
 
+  // Cegah request ganda bertumpuk yang menyebabkan delay dan konflik data
+  if (isFetchingFromCloud) {
+    if (callback) callback(false);
+    return;
+  }
+
+  // Throttle auto-sync otomatis (tab-switch/visibilitychange): minimal jeda 10 detik
+  const now = Date.now();
+  if (!showToast && (now - lastCloudFetchTime < 10000)) {
+    if (callback) callback(true);
+    return;
+  }
+
+  isFetchingFromCloud = true;
   updateCloudBadge('syncing', 'Memuat Cloud...');
 
   fetch(GOOGLE_SHEETS_WEB_APP_URL)
@@ -166,6 +183,8 @@ function syncFromGoogleSheetsCloud(showToast = true, callback = null) {
       return res.json();
     })
     .then(cloudDb => {
+      isFetchingFromCloud = false;
+      lastCloudFetchTime = Date.now();
       if (!cloudDb || typeof cloudDb !== 'object') {
         throw new Error('Data cloud tidak valid');
       }
@@ -268,9 +287,13 @@ function syncFromGoogleSheetsCloud(showToast = true, callback = null) {
       if (cloudDb.pengaturan) {
         const rawPeng = Array.isArray(cloudDb.pengaturan) ? cloudDb.pengaturan[0] : cloudDb.pengaturan;
         if (rawPeng && typeof rawPeng === 'object' && Object.keys(rawPeng).length > 0) {
+          const sanitizedUrl = (rawPeng.appsScriptUrl && !rawPeng.appsScriptUrl.includes(OLD_APPS_SCRIPT_URL_PATTERN)) 
+            ? rawPeng.appsScriptUrl 
+            : GOOGLE_SHEETS_WEB_APP_URL;
           db.pengaturan = {
             ...DEFAULT_PENGATURAN,
-            ...rawPeng
+            ...rawPeng,
+            appsScriptUrl: sanitizedUrl
           };
           hasNewCloudData = true;
         }
@@ -284,6 +307,7 @@ function syncFromGoogleSheetsCloud(showToast = true, callback = null) {
       if (callback) callback(true);
     })
     .catch(err => {
+      isFetchingFromCloud = false;
       console.warn('Gagal mengambil data dari Google Sheets:', err);
       updateCloudBadge('error', 'Offline');
       if (callback) callback(false);
@@ -662,8 +686,10 @@ function processLocalFileToDataUrlAndCloud(file, callback, customFileName) {
 }
 
 function uploadToDriveIfAvailable(file, dataUrl, customFileName, callback) {
-  const appsScriptUrl = db.pengaturan?.appsScriptUrl || GOOGLE_SHEETS_WEB_APP_URL;
-  if (!appsScriptUrl || appsScriptUrl.trim() === '') return;
+  let appsScriptUrl = db.pengaturan?.appsScriptUrl || GOOGLE_SHEETS_WEB_APP_URL;
+  if (!appsScriptUrl || appsScriptUrl.includes(OLD_APPS_SCRIPT_URL_PATTERN) || appsScriptUrl.trim() === '') {
+    appsScriptUrl = GOOGLE_SHEETS_WEB_APP_URL;
+  }
 
   const base64Data = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
   const payload = {
@@ -696,8 +722,10 @@ function extractDriveFileId(url) {
 }
 
 function deleteFileFromCloudByUrl(url) {
-  const appsScriptUrl = db.pengaturan?.appsScriptUrl;
-  if (!appsScriptUrl || appsScriptUrl.trim() === '') return;
+  let appsScriptUrl = db.pengaturan?.appsScriptUrl || GOOGLE_SHEETS_WEB_APP_URL;
+  if (!appsScriptUrl || appsScriptUrl.includes(OLD_APPS_SCRIPT_URL_PATTERN) || appsScriptUrl.trim() === '') {
+    appsScriptUrl = GOOGLE_SHEETS_WEB_APP_URL;
+  }
   const fileId = extractDriveFileId(url);
   if (!fileId) return;
 
@@ -857,8 +885,17 @@ function loadDatabase() {
     });
   }
 
-  // Data siswa murni fokus dari Google Spreadsheet Cloud & Excel upload, tidak memaksakan data lokal lama
-  loadedDb.siswa = [];
+  // Bersihkan URL exec lama dari penyimpanan lokal jika tersisa
+  if (loadedDb.pengaturan) {
+    if (!loadedDb.pengaturan.appsScriptUrl || loadedDb.pengaturan.appsScriptUrl.includes(OLD_APPS_SCRIPT_URL_PATTERN)) {
+      loadedDb.pengaturan.appsScriptUrl = GOOGLE_SHEETS_WEB_APP_URL;
+    }
+  }
+
+  // Pastikan data siswa tetap tersimpan di memori lokal agar langsung tampil tanpa delay saat refresh (sama seperti data guru)
+  if (!Array.isArray(loadedDb.siswa)) {
+    loadedDb.siswa = [];
+  }
 
   return loadedDb;
 }
@@ -3576,7 +3613,13 @@ function savePengaturan(e) {
   db.pengaturan.tahunAjaran = document.getElementById('settingTahunAjaran').value;
   db.pengaturan.kepalaSekolah = document.getElementById('settingKepalaSekolah').value;
   db.pengaturan.alamatSekolah = document.getElementById('settingAlamatSekolah').value;
-  db.pengaturan.appsScriptUrl = document.getElementById('settingAppsScriptUrl').value;
+
+  let inputUrl = document.getElementById('settingAppsScriptUrl').value.trim();
+  if (inputUrl.includes(OLD_APPS_SCRIPT_URL_PATTERN) || inputUrl === '') {
+    inputUrl = GOOGLE_SHEETS_WEB_APP_URL;
+    document.getElementById('settingAppsScriptUrl').value = inputUrl;
+  }
+  db.pengaturan.appsScriptUrl = inputUrl;
   db.pengaturan.driveFolderId = document.getElementById('settingDriveFolderId').value;
   
   saveDatabase();
