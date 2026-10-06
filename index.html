@@ -16,7 +16,7 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="style.css?v=24">
+  <link rel="stylesheet" href="style.css?v=29">
 </head>
 
 <body>
@@ -215,6 +215,11 @@
         </div>
       </div>
 
+    </section>
+
+    <!-- SECTION 1B: DETAIL BERITA & INFORMASI (PORTAL 2 KOLOM SEPERTI CONTOH) -->
+    <section id="beritaDetailSection" class="page-section hide">
+      <!-- Dynamic Injected by openDetailBerita() -->
     </section>
 
     <!-- SECTION 2: PROFIL SEKOLAH (MODERN & ELEGAN) -->
@@ -722,8 +727,21 @@
     </div>
   </div>
 
+  <!-- MODAL 8: DETAIL BERITA & INFORMASI SEKOLAH (HALAMAN PENUH / FULL READER) -->
+  <div class="modal" id="detailBeritaModal">
+    <div class="modal-box" style="max-width: 860px; padding: 24px; max-height: 92vh; overflow-y: auto;">
+      <div class="modal-header" style="margin-bottom: 14px; padding-bottom: 10px;">
+        <h2><i class="fa-solid fa-newspaper" style="color:var(--primary)"></i> Detail Berita & Informasi Sekolah</h2>
+        <button class="modal-close" onclick="closeModal('detailBeritaModal')">&times;</button>
+      </div>
+      <div id="detailBeritaBody">
+        <!-- Dynamic Full News Article Content -->
+      </div>
+    </div>
+  </div>
+
   <!-- App Script -->
-  <script src="app.js?v=26"></script>
+  <script src="app.js?v=29"></script>
 </body>
 
 </html>
