@@ -232,27 +232,68 @@ function syncFromGoogleSheetsCloud(showToast = true, callback = null) {
         }
       });
 
-      // 2. Parse berita
-      if (cloudDb.berita && Array.isArray(cloudDb.berita) && cloudDb.berita.length > 0) {
-        db.berita = cloudDb.berita.map(b => {
-          let fotosArr = [];
-          if (Array.isArray(b.fotos)) {
-            fotosArr = b.fotos;
-          } else if (typeof b.fotos === 'string' && b.fotos.trim() !== '') {
-            if (b.fotos.startsWith('[')) {
-              try { fotosArr = JSON.parse(b.fotos); } catch(e) { fotosArr = [b.fotos]; }
-            } else {
-              fotosArr = b.fotos.split(',').map(s => s.trim()).filter(Boolean);
+      // 2. Parse berita (Gabungkan dengan DEFAULT_BERITA_LIST agar artikel portal tidak hilang saat sinkronisasi cloud)
+      if (cloudDb.berita && Array.isArray(cloudDb.berita)) {
+        const mappedCloud = cloudDb.berita
+          .filter(b => b && typeof b === 'object' && Object.values(b).some(v => v !== null && String(v).trim() !== ''))
+          .map(b => {
+            const judul = (b.judul || b.Judul || '').trim();
+            if (!judul) return null;
+
+            let fotosArr = [];
+            const rawFotos = b.fotos || b.Fotos;
+            const rawFoto = b.foto || b.Foto;
+            if (Array.isArray(rawFotos)) {
+              fotosArr = rawFotos;
+            } else if (typeof rawFotos === 'string' && rawFotos.trim() !== '') {
+              if (rawFotos.startsWith('[')) {
+                try { fotosArr = JSON.parse(rawFotos); } catch(e) { fotosArr = [rawFotos]; }
+              } else {
+                fotosArr = rawFotos.split(',').map(s => s.trim()).filter(Boolean);
+              }
+            } else if (rawFoto) {
+              fotosArr = [rawFoto];
             }
-          } else if (b.foto) {
-            fotosArr = [b.foto];
+            if (fotosArr.length === 0) {
+              fotosArr = ['https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=600&q=80'];
+            }
+
+            let rawTgl = b.tanggal || b.Tanggal || '';
+            if (rawTgl && (rawTgl.includes('T') || rawTgl.includes('Z') || rawTgl.match(/^\d{4}-\d{2}-\d{2}/))) {
+              try {
+                const d = new Date(rawTgl);
+                if (!isNaN(d.getTime())) {
+                  rawTgl = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                }
+              } catch(e) {}
+            }
+
+            const rawRingkasan = (b.ringkasan || b.Ringkasan || '').trim();
+            const rawKonten = (b.konten || b.Konten || b.isi || b.Isi || '').trim();
+            const fallbackRingkasan = rawRingkasan || (rawKonten ? (rawKonten.substring(0, 140) + '...') : 'Informasi dan pengumuman resmi kegiatan sekolah.');
+            const fallbackKonten = rawKonten || rawRingkasan || 'Informasi dan pengumuman resmi sekolah.';
+
+            return {
+              ...b,
+              judul: judul,
+              kategori: b.kategori || b.Kategori || 'Pengumuman',
+              tanggal: rawTgl || '12 Agustus 2026',
+              penulis: b.penulis || b.Penulis || 'Humas Sekolah',
+              ringkasan: fallbackRingkasan,
+              konten: fallbackKonten,
+              fotos: fotosArr,
+              foto: fotosArr[0]
+            };
+          }).filter(Boolean);
+
+        // Gabungkan berita dari Cloud (misal: "Jumsih") dengan DEFAULT_BERITA_LIST agar berita portal tetap lengkap dan tidak pernah hilang
+        const mergedBerita = [...mappedCloud];
+        DEFAULT_BERITA_LIST.forEach(def => {
+          if (!mergedBerita.some(m => (m.judul || '').trim().toLowerCase() === (def.judul || '').trim().toLowerCase())) {
+            mergedBerita.push(def);
           }
-          return {
-            ...b,
-            fotos: fotosArr.length > 0 ? fotosArr : ['https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=600&q=80'],
-            foto: fotosArr[0] || b.foto || ''
-          };
         });
+        db.berita = mergedBerita;
         hasNewCloudData = true;
       } else if (!db.berita || db.berita.length === 0) {
         db.berita = DEFAULT_BERITA_LIST;
@@ -1040,10 +1081,14 @@ function loadDatabase() {
     loadedDb.siswa = [];
   }
 
-  // Pastikan data berita memiliki artikel default lengkap (termasuk artikel Kemendikdasmen dari portal)
-  if (!Array.isArray(loadedDb.berita) || loadedDb.berita.length === 0 || !loadedDb.berita.some(b => b && b.judul && b.judul.includes('Kemendikdasmen'))) {
-    loadedDb.berita = DEFAULT_BERITA_LIST;
-  }
+  // Pastikan data berita selalu lengkap dan menggabungkan item tersimpan dengan DEFAULT_BERITA_LIST
+  let baseBerita = Array.isArray(loadedDb.berita) ? [...loadedDb.berita] : [];
+  DEFAULT_BERITA_LIST.forEach(def => {
+    if (!baseBerita.some(b => b && (b.judul || '').trim().toLowerCase() === (def.judul || '').trim().toLowerCase())) {
+      baseBerita.push(def);
+    }
+  });
+  loadedDb.berita = baseBerita;
 
   return loadedDb;
 }
@@ -1072,6 +1117,20 @@ function updateCurrentDate() {
   } catch(e) {
     console.warn('Format date error:', e);
   }
+}
+
+function formatDisplayDate(str) {
+  if (!str) return 'Terbaru';
+  const clean = String(str).trim();
+  if (clean.includes('T') || clean.includes('Z') || clean.match(/^\d{4}-\d{2}-\d{2}/)) {
+    try {
+      const d = new Date(clean);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+      }
+    } catch(e) {}
+  }
+  return clean;
 }
 
 // HANDLER EXCEL SERIAL DATE & VARIOUS DATE PARSERS
@@ -1408,11 +1467,11 @@ function renderBeritaGrid() {
           <div class="berita-body">
             <div>
               <div class="berita-date">
-                <i class="fa-regular fa-calendar"></i> ${esc(item.tanggal || '12 Agustus 2026')}
+                <i class="fa-regular fa-calendar"></i> ${esc(formatDisplayDate(item.tanggal || '12 Agustus 2026'))}
                 ${isMultiPhoto ? `<span style="margin-left:auto;color:var(--emerald);font-weight:700;"><i class="fa-solid fa-images"></i> ${photoArr.length} Foto Slide</span>` : ''}
               </div>
               <div class="berita-title-text">${esc(item.judul)}</div>
-              <div class="berita-snippet-text">${esc(item.ringkasan)}</div>
+              <div class="berita-snippet-text">${esc(item.ringkasan || (item.konten ? item.konten.substring(0, 140) + '...' : 'Informasi dan dokumentasi kegiatan sekolah.'))}</div>
             </div>
 
             <div class="berita-read-more-bar">
@@ -1483,7 +1542,7 @@ let currentDetailBeritaSlide = 0;
 let currentDetailBeritaPhotos = [];
 
 function openDetailBerita(idx) {
-  const bList = db.berita || DEFAULT_BERITA_LIST;
+  const bList = (db && Array.isArray(db.berita) && db.berita.length > 0) ? db.berita : DEFAULT_BERITA_LIST;
   if (!bList || bList.length === 0) return;
 
   if (idx < 0 || idx >= bList.length) idx = 0;
@@ -1583,7 +1642,7 @@ function openDetailBerita(idx) {
             <i class="fa-solid fa-user" style="color:#64748b;"></i> ${esc(authorName)}
           </span>
           <span class="portal-meta-item">
-            <i class="fa-regular fa-clock" style="color:#64748b;"></i> ${esc(item.tanggal || '16 Juli 2026')}
+            <i class="fa-regular fa-clock" style="color:#64748b;"></i> ${esc(formatDisplayDate(item.tanggal || '16 Juli 2026'))}
           </span>
           <span class="portal-meta-item">
             <i class="fa-regular fa-eye" style="color:#64748b;"></i> Dibaca: ${viewCount}
@@ -1644,7 +1703,7 @@ function openDetailBerita(idx) {
                   <div class="portal-recent-info">
                     <div class="portal-recent-title">${esc(other.judul)}</div>
                     <div class="portal-recent-date">
-                      <i class="fa-regular fa-clock"></i> ${esc(other.tanggal || 'Terbaru')}
+                      <i class="fa-regular fa-clock"></i> ${esc(formatDisplayDate(other.tanggal || 'Terbaru'))}
                     </div>
                   </div>
                 </div>
@@ -1689,10 +1748,11 @@ function movePortalDetailSlide(direction) {
 
 function backToDashboard() {
   showSection('dashboard');
+  renderBeritaGrid();
   setTimeout(() => {
     const el = document.getElementById('dashboardBeritaHeader') || document.getElementById('dashboard');
     if (el) el.scrollIntoView({ behavior: 'smooth' });
-  }, 60);
+  }, 40);
 }
 
 // Backward compatibility alias for modal calls
