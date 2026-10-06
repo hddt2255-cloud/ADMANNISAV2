@@ -46,7 +46,15 @@ function prepareCloudPayload() {
   // 1. Master Table Arrays
   const tableKeys = ['guru', 'siswa', 'masuk', 'keluar', 'lulusan', 'kelas', 'administrasi', 'inventaris', 'ruangan', 'uks', 'perpustakaan'];
   tableKeys.forEach(k => {
-    payload[k] = Array.isArray(db[k]) ? db[k] : [];
+    if (Array.isArray(db[k]) && db[k].length > 0) {
+      payload[k] = db[k];
+    } else {
+      // Wajib kirim 1 baris objek kosong bertaut header agar Google Apps Script benar-benar mengosongkan sheet di Google Spreadsheet
+      const cols = (typeof TABLE_CFG !== 'undefined' && TABLE_CFG[k] && TABLE_CFG[k][1]) ? TABLE_CFG[k][1] : ['Nama', 'NISN', 'Kelas'];
+      const blankRow = {};
+      cols.forEach(c => { blankRow[c] = ''; });
+      payload[k] = [blankRow];
+    }
   });
 
   // 2. Berita (ensure fotos array is properly serialized for Google Sheets)
@@ -163,16 +171,18 @@ function syncFromGoogleSheetsCloud(showToast = true, callback = null) {
       }
 
       let hasNewCloudData = false;
-      let needPushLocalToCloud = false;
 
       // 1. Parse tables
       const tableKeys = ['guru', 'siswa', 'masuk', 'keluar', 'lulusan', 'kelas', 'administrasi', 'inventaris', 'ruangan', 'uks', 'perpustakaan'];
       tableKeys.forEach(k => {
         if (cloudDb[k] !== undefined && Array.isArray(cloudDb[k])) {
-          if (cloudDb[k].length > 0) {
+          // Filter out any blank schema marker row (where all values are empty)
+          const validRows = cloudDb[k].filter(row => row && typeof row === 'object' && Object.values(row).some(v => v !== null && String(v).trim() !== ''));
+          
+          if (validRows.length > 0) {
             // Merge with local to preserve any local photo/attachment dataUrl if cloud cell is empty
             if (db[k] && Array.isArray(db[k]) && db[k].length > 0) {
-              cloudDb[k].forEach((cloudRow, cIdx) => {
+              validRows.forEach((cloudRow, cIdx) => {
                 const localRow = db[k].find(l => l.Nama && cloudRow.Nama && l.Nama.trim().toLowerCase() === cloudRow.Nama.trim().toLowerCase()) || db[k][cIdx];
                 if (localRow) {
                   if (localRow.Foto && (!cloudRow.Foto || cloudRow.Foto.trim() === '')) {
@@ -184,11 +194,21 @@ function syncFromGoogleSheetsCloud(showToast = true, callback = null) {
                 }
               });
             }
-            db[k] = cloudDb[k];
+            db[k] = validRows;
             hasNewCloudData = true;
-          } else if (db[k] && Array.isArray(db[k]) && db[k].length > 0) {
-            // Local has data but cloud is empty: DO NOT OVERWRITE LOCAL!
-            needPushLocalToCloud = true;
+            if (k === 'siswa') {
+              localStorage.removeItem('sdit_siswa_cleared');
+            }
+          } else {
+            // Cloud table is empty -> user deleted/emptied this table in cloud or on another device!
+            // Keep local state in sync: set local to empty!
+            if (db[k] && Array.isArray(db[k]) && db[k].length > 0) {
+              hasNewCloudData = true;
+            }
+            db[k] = [];
+            if (k === 'siswa') {
+              localStorage.setItem('sdit_siswa_cleared', 'true');
+            }
           }
         }
       });
@@ -217,7 +237,6 @@ function syncFromGoogleSheetsCloud(showToast = true, callback = null) {
         hasNewCloudData = true;
       } else if (!db.berita || db.berita.length === 0) {
         db.berita = DEFAULT_BERITA_LIST;
-        needPushLocalToCloud = true;
       }
 
       // 3. Parse profil
@@ -261,10 +280,6 @@ function syncFromGoogleSheetsCloud(showToast = true, callback = null) {
       saveDatabaseLocalOnly();
       refreshAllViews();
       updateCloudBadge('synced');
-
-      if (needPushLocalToCloud) {
-        syncToGoogleSheetsCloud();
-      }
 
       if (callback) callback(true);
     })
@@ -803,17 +818,14 @@ function renderDashboardCharts() {
 function loadDatabase() {
   const dataStr = localStorage.getItem(DB_KEY);
   let loadedDb = null;
-
-  const defaultSiswaSeed = (typeof DEFAULT_SISWA_EXCEL_DATABASE !== 'undefined' && Array.isArray(DEFAULT_SISWA_EXCEL_DATABASE) && DEFAULT_SISWA_EXCEL_DATABASE.length > 0)
-    ? DEFAULT_SISWA_EXCEL_DATABASE
-    : [];
+  const isSiswaCleared = localStorage.getItem('sdit_siswa_cleared') === 'true';
 
   const defaultLists = {
     pengaturan: DEFAULT_PENGATURAN,
     profil: DEFAULT_PROFIL,
     berita: DEFAULT_BERITA_LIST,
     guru: DEFAULT_GURU_LIST,
-    siswa: defaultSiswaSeed,
+    siswa: [],
     masuk: [],
     keluar: [],
     lulusan: DEFAULT_LULUSAN_LIST,
@@ -837,17 +849,16 @@ function loadDatabase() {
   if (!loadedDb || typeof loadedDb !== 'object') {
     loadedDb = { ...defaultLists };
   } else {
-    // Fill any missing or empty array with default seeds
+    // Fill ONLY missing or undefined keys, NEVER overwrite existing arrays even if empty []!
     Object.keys(defaultLists).forEach(key => {
-      if (Array.isArray(defaultLists[key])) {
-        if (!loadedDb[key] || !Array.isArray(loadedDb[key]) || loadedDb[key].length === 0) {
-          loadedDb[key] = [...defaultLists[key]];
-        }
-      } else if (!loadedDb[key]) {
-        loadedDb[key] = defaultLists[key];
+      if (loadedDb[key] === undefined || loadedDb[key] === null) {
+        loadedDb[key] = Array.isArray(defaultLists[key]) ? [] : defaultLists[key];
       }
     });
   }
+
+  // Data siswa murni fokus dari Google Spreadsheet Cloud & Excel upload, tidak memaksakan data lokal lama
+  loadedDb.siswa = [];
 
   return loadedDb;
 }
@@ -2825,6 +2836,7 @@ function clearAllSiswaData() {
        if (row.Foto && row.Foto.includes('drive.google.com')) deleteFileFromCloudByUrl(row.Foto);
     });
     db.siswa = [];
+    localStorage.setItem('sdit_siswa_cleared', 'true');
     saveDatabase();
     renderTable('siswa');
     alert('Seluruh Data Siswa telah berhasil dikosongkan.');
@@ -2888,6 +2900,10 @@ function deleteBatchSelectedRows() {
         db[currentSectionId].splice(idx, 1);
       }
     });
+
+    if (currentSectionId === 'siswa' && (!db.siswa || db.siswa.length === 0)) {
+      localStorage.setItem('sdit_siswa_cleared', 'true');
+    }
 
     saveDatabase();
     renderTable(currentSectionId);
@@ -3083,6 +3099,10 @@ function saveFormModal(e, idx) {
     db[currentSectionId].push(newRow);
   }
 
+  if (currentSectionId === 'siswa') {
+    localStorage.removeItem('sdit_siswa_cleared');
+  }
+
   saveDatabase();
   tempUploadedSingleFormPhoto = '';
   closeModal('formModal');
@@ -3092,7 +3112,7 @@ function saveFormModal(e, idx) {
 
 function deleteTableRow(idx) {
   if (!isAdminLoggedIn) {
-    alert('Silakan login via Icon Admin (dY` ) terlebih dahulu.');
+    alert('Silakan login via Icon Admin (👤) terlebih dahulu.');
     return;
   }
   if (confirm('Yakin ingin menghapus data ini?')) {
@@ -3102,6 +3122,9 @@ function deleteTableRow(idx) {
         if (row['File Surat'] && row['File Surat'].includes('drive.google.com')) deleteFileFromCloudByUrl(row['File Surat']);
     }
     db[currentSectionId].splice(idx, 1);
+    if (currentSectionId === 'siswa' && (!db.siswa || db.siswa.length === 0)) {
+      localStorage.setItem('sdit_siswa_cleared', 'true');
+    }
     saveDatabase();
     renderTable(currentSectionId);
   }
@@ -3377,6 +3400,9 @@ function handleExcelFileUpload(event) {
       });
 
       if (addedCount > 0) {
+        if (currentSectionId === 'siswa') {
+          localStorage.removeItem('sdit_siswa_cleared');
+        }
         saveDatabase();
         renderTable(currentSectionId);
         alert(`🎉 Berhasil mengunggah & mengimpor ${addedCount} data baru dari file Excel ke ${TABLE_CFG[currentSectionId][0]}!`);
