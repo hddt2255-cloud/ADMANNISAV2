@@ -2559,11 +2559,9 @@ function openSuratPindahanModal(type, realIdx) {
             <div>Bekasi, ${tglKejadian}</div>
             <div style="font-weight:bold;margin-top:4px;margin-bottom:6px;">Kepala SDIT ANNISA</div>
             
-            <div style="height:125px;display:flex;align-items:center;justify-content:center;position:relative;">
-              <img src="stempel_ttd.png" alt="Stempel & TTD Resmi SDIT AN NISA Abdul Yakub, S.Ag" style="max-height:145px;width:210px;object-fit:contain;mix-blend-mode:multiply;">
-            </div>
+            <div style="height:85px;"></div>
 
-            <div style="font-weight:bold;font-size:12pt;margin-top:4px;">Abdul Yakub,S.Ag</div>
+            <div style="font-weight:bold;text-decoration:underline;font-size:12pt;margin-top:4px;">${esc(headmasterName)}</div>
           </div>
         </div>
       </div>
@@ -2654,9 +2652,7 @@ function openSuratPindahanModal(type, realIdx) {
             <div>Bekasi, ${tglKejadian}</div>
             <div style="font-weight:bold;margin-top:4px;margin-bottom:6px;">Kepala SDIT ANNISA</div>
             
-            <div style="height:125px;display:flex;align-items:center;justify-content:center;position:relative;">
-              <img src="stempel_ttd.png" alt="Stempel & TTD Resmi SDIT AN NISA Abdul Yakub, S.Ag" style="max-height:145px;width:210px;object-fit:contain;mix-blend-mode:multiply;">
-            </div>
+            <div style="height:85px;"></div>
 
             <div style="font-weight:bold;text-decoration:underline;font-size:12pt;margin-top:4px;">${esc(headmasterName)}</div>
           </div>
