@@ -43,6 +43,59 @@ function triggerManualSync() {
   });
 }
 
+// SISTEM PENCATATAN BERITA YANG DIHAPUS PERMANEN (AGAR TIDAK RECOVER SAAT REFRESH / SYNC)
+const DELETED_BERITA_KEY = 'sdit_deleted_berita';
+
+function normalizeBeritaKey(str) {
+  if (!str) return '';
+  return String(str)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/smpn\s*32\s*bekasi/gi, 'sekolah')
+    .replace(/smpn\s*32/gi, 'sekolah');
+}
+
+function getDeletedBeritaTitles() {
+  try {
+    const raw = localStorage.getItem(DELETED_BERITA_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) {
+    return [];
+  }
+}
+
+function recordDeletedBerita(title) {
+  if (!title) return;
+  const list = getDeletedBeritaTitles();
+  const rawKey = String(title).trim().toLowerCase();
+  const normKey = normalizeBeritaKey(title);
+  let changed = false;
+  if (!list.includes(rawKey)) {
+    list.push(rawKey);
+    changed = true;
+  }
+  if (normKey && !list.includes(normKey)) {
+    list.push(normKey);
+    changed = true;
+  }
+  if (changed) {
+    try {
+      localStorage.setItem(DELETED_BERITA_KEY, JSON.stringify(list));
+    } catch(e) {}
+  }
+}
+
+function isBeritaDeleted(itemOrTitle) {
+  if (!itemOrTitle) return false;
+  const title = typeof itemOrTitle === 'object' ? (itemOrTitle.judul || '') : itemOrTitle;
+  if (!title) return false;
+  const rawKey = String(title).trim().toLowerCase();
+  const normKey = normalizeBeritaKey(title);
+  const list = getDeletedBeritaTitles();
+  return list.includes(rawKey) || list.includes(normKey);
+}
+
 function prepareCloudPayload() {
   const payload = {};
   
@@ -61,7 +114,7 @@ function prepareCloudPayload() {
   });
 
   // 2. Berita (ensure fotos array is properly serialized for Google Sheets)
-  if (Array.isArray(db.berita)) {
+  if (Array.isArray(db.berita) && db.berita.length > 0) {
     payload.berita = db.berita.map(b => {
       let fotosStr = '';
       if (Array.isArray(b.fotos)) {
@@ -72,15 +125,16 @@ function prepareCloudPayload() {
         fotosStr = b.foto;
       }
       return {
-        judul: b.judul || '',
+        judul: (b.judul || '').replace(/smpn\s*32\s*bekasi/gi, 'Sekolah').replace(/smpn\s*32/gi, 'Sekolah'),
         kategori: b.kategori || 'Berita',
         tanggal: b.tanggal || '',
         fotos: fotosStr,
-        ringkasan: b.ringkasan || ''
+        ringkasan: (b.ringkasan || '').replace(/humas\s+smpn\s*32/gi, 'Humas Sekolah').replace(/smpn\s*32/gi, 'Sekolah')
       };
     });
   } else {
-    payload.berita = [];
+    // Kirim 1 baris kosong agar sheet Berita di Google Apps Script benar-benar terhapus / dikosongkan
+    payload.berita = [{ judul: '', kategori: '', tanggal: '', fotos: '', ringkasan: '' }];
   }
 
   // 3. Profil (wrap in array of 1 object so Google Sheets persists it as a sheet)
@@ -90,7 +144,7 @@ function prepareCloudPayload() {
     tagline: p.tagline || '',
     akreditasi: p.akreditasi || 'A (Sangat Baik)',
     npsn: p.npsn || '20231556',
-    kota: p.kota || 'Jakarta',
+    kota: 'Jatiasih Kota Bekasi',
     namaKepala: p.namaKepala || 'Abdul Yakub, S.Ag',
     jabatanKepala: p.jabatanKepala || 'Kepala Sekolah SDIT ANNISA',
     fotoKepala: p.fotoKepala || '',
@@ -98,7 +152,7 @@ function prepareCloudPayload() {
     visiText: p.visiText || '',
     misiList: Array.isArray(p.misiList) ? JSON.stringify(p.misiList) : (p.misiList || ''),
     namaLengkap: p.namaLengkap || '',
-    alamat: p.alamat || '',
+    alamat: (p.alamat && !p.alamat.toLowerCase().includes('jakarta')) ? p.alamat : 'Jl. Wibawa Mukti II No.5 Jatiasih Kota Bekasi',
     telepon: p.telepon || '',
     email: p.email || ''
   }];
@@ -273,30 +327,62 @@ function syncFromGoogleSheetsCloud(showToast = true, callback = null) {
             const fallbackRingkasan = rawRingkasan || (rawKonten ? (rawKonten.substring(0, 140) + '...') : 'Informasi dan pengumuman resmi kegiatan sekolah.');
             const fallbackKonten = rawKonten || rawRingkasan || 'Informasi dan pengumuman resmi sekolah.';
 
+            let author = (b.penulis || b.Penulis || 'Humas Sekolah').replace(/humas\s+smpn\s*32/gi, 'Humas Sekolah').replace(/smpn\s*32/gi, 'Sekolah');
+            let jdl = (judul || '').replace(/smpn\s*32\s*bekasi/gi, 'Sekolah').replace(/smpn\s*32/gi, 'Sekolah');
+
             return {
               ...b,
-              judul: judul,
+              judul: jdl,
               kategori: b.kategori || b.Kategori || 'Pengumuman',
               tanggal: rawTgl || '12 Agustus 2026',
-              penulis: b.penulis || b.Penulis || 'Humas Sekolah',
-              ringkasan: fallbackRingkasan,
-              konten: fallbackKonten,
+              penulis: author,
+              ringkasan: fallbackRingkasan.replace(/humas\s+smpn\s*32/gi, 'Humas Sekolah').replace(/smpn\s*32/gi, 'Sekolah'),
+              konten: fallbackKonten.replace(/humas\s+smpn\s*32/gi, 'Humas Sekolah').replace(/smpn\s*32/gi, 'Sekolah'),
               fotos: fotosArr,
               foto: fotosArr[0]
             };
           }).filter(Boolean);
 
-        // Gabungkan berita dari Cloud (misal: "Jumsih") dengan DEFAULT_BERITA_LIST agar berita portal tetap lengkap dan tidak pernah hilang
-        const mergedBerita = [...mappedCloud];
-        DEFAULT_BERITA_LIST.forEach(def => {
-          if (!mergedBerita.some(m => (m.judul || '').trim().toLowerCase() === (def.judul || '').trim().toLowerCase())) {
-            mergedBerita.push(def);
+        // 1. Buang semua berita cloud yang pernah dihapus permanen oleh admin
+        const filteredCloud = mappedCloud.filter(m => !isBeritaDeleted(m));
+
+        // 2. Buang duplikasi berita dari cloud
+        const uniqueCloud = [];
+        filteredCloud.forEach(m => {
+          const mKey = normalizeBeritaKey(m.judul);
+          if (!uniqueCloud.some(u => normalizeBeritaKey(u.judul) === mKey)) {
+            uniqueCloud.push(m);
           }
         });
+
+        // 3. Gabungkan berita lokal yang belum ada di cloud (misal berita baru ditambah yang belum sync)
+        const mergedBerita = [...uniqueCloud];
+        if (Array.isArray(db.berita)) {
+          db.berita.forEach(loc => {
+            if (!isBeritaDeleted(loc)) {
+              const locKey = normalizeBeritaKey(loc.judul);
+              if (!mergedBerita.some(m => normalizeBeritaKey(m.judul) === locKey)) {
+                mergedBerita.unshift(loc);
+              }
+            }
+          });
+        }
+
+        // 4. HANYA jika list berita benar-benar kosong dan belum pernah menghapus apapun, gunakan default
+        if (mergedBerita.length === 0 && getDeletedBeritaTitles().length === 0) {
+          DEFAULT_BERITA_LIST.forEach(def => {
+            if (!isBeritaDeleted(def)) mergedBerita.push(def);
+          });
+        }
+
         db.berita = mergedBerita;
         hasNewCloudData = true;
       } else if (!db.berita || db.berita.length === 0) {
-        db.berita = DEFAULT_BERITA_LIST;
+        if (getDeletedBeritaTitles().length === 0) {
+          db.berita = DEFAULT_BERITA_LIST.filter(def => !isBeritaDeleted(def));
+        } else {
+          db.berita = [];
+        }
       }
 
       // 3. Parse profil
@@ -318,6 +404,8 @@ function syncFromGoogleSheetsCloud(showToast = true, callback = null) {
           db.profil = {
             ...DEFAULT_PROFIL,
             ...rawProfil,
+            kota: 'Jatiasih Kota Bekasi',
+            alamat: (rawProfil.alamat && !rawProfil.alamat.toLowerCase().includes('jakarta')) ? rawProfil.alamat : 'Jl. Wibawa Mukti II No.5 Jatiasih Kota Bekasi',
             misiList: misiList
           };
           hasNewCloudData = true;
@@ -409,7 +497,7 @@ const ADMIN_PASSWORD_CORRECT = 'hdt123';
 // INITIAL DEFAULT STATE (NPSN: 20231556, NAMA KEPALA SEKOLAH: Abdul Yakub, S.Ag)
 const DEFAULT_PENGATURAN = {
   namaSekolah: 'SDIT ANNISA',
-  alamatSekolah: 'Kec. Jatiasih',
+  alamatSekolah: 'Jl. Wibawa Mukti II No.5 Jatiasih Kota Bekasi',
   kepalaSekolah: 'Abdul Yakub, S.Ag',
   tahunAjaran: '2026/2027',
   logo: '',
@@ -423,7 +511,7 @@ const DEFAULT_PROFIL = {
   tagline: 'Mendidik Generasi Rabbani yang Unggul, Beradab, dan Bertaqwa Berlandaskan Al-Qur\'an dan As-Sunnah.',
   akreditasi: 'A (Sangat Baik)',
   npsn: '20231556',
-  kota: 'Jakarta Selatan',
+  kota: 'Jatiasih Kota Bekasi',
   namaKepala: 'Abdul Yakub, S.Ag',
   jabatanKepala: 'Kepala Sekolah SDIT ANNISA',
   fotoKepala: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=400&q=80',
@@ -440,7 +528,7 @@ Kami percaya bahwa setiap anak adalah amanah berharga yang memiliki potensi isti
     "Menjalin kemitraan sinergis yang erat dengan orang tua dan masyarakat dalam pendidikan anak."
   ],
   namaLengkap: 'SDIT ANNISA (Sekolah Dasar Islam Terpadu)',
-  alamat: 'Jl. Wibawa Mukti II No.05 RT.03 RW.06 Jatiasih, Jatiasih Bekasi',
+  alamat: 'Jl. Wibawa Mukti II No.5 Jatiasih Kota Bekasi',
   telepon: '(021) 8243-1220',
   email: 'info@sditannisa.sch.id • sditannisa2.netlify.app'
 };
@@ -450,7 +538,7 @@ const DEFAULT_BERITA_LIST = [
     judul: "Kemendikdasmen Sambut Tahun Ajaran Baru",
     kategori: "Pendidikan",
     tanggal: "16 Juli 2026",
-    penulis: "Humas SMPN 32",
+    penulis: "Humas Sekolah",
     views: 253,
     foto: "poster_kemendikdasmen.png",
     fotos: [
@@ -470,7 +558,7 @@ Kampanye ini juga menegaskan komitmen pemerintah dalam menciptakan lingkungan be
     judul: "AUDISI GOT TALENT 2022",
     kategori: "Kreativitas",
     tanggal: "14 Juli 2026",
-    penulis: "Humas SMPN 32",
+    penulis: "Humas Sekolah",
     views: 198,
     foto: "thumb_gottalent.png",
     fotos: [
@@ -555,7 +643,7 @@ Peserta didik diberikan edukasi interaktif mengenai tugas kementerian, peran pim
 Dengan pembawaan yang penuh penghayatan, artikulasi intonasi yang memukau, dan ekspresi patriotik yang mendalam, Arleta berhasil menyisihkan puluhan peserta dari berbagai sekolah. Semoga prestasi ini menjadi pemicu semangat untuk terus berkarya di bidang sastra dan seni budaya.`
   },
   {
-    judul: "SMPN 32 Bekasi Sukses Tuntaskan TKA 2026",
+    judul: "Sekolah Sukses Tuntaskan TKA 2026",
     kategori: "Akademik",
     tanggal: "15 Juni 2026",
     penulis: "Humas Kurikulum",
@@ -600,7 +688,7 @@ Syarat & Alur Pendaftaran:
 
 Informasi & Konsultasi Langsung:
 Sekretariat PPDB SDIT ANNISA
-Jl. Wibawa Mukti II No.05 RT.03 RW.06 Jatiasih, Jatiasih Bekasi
+Jl. Wibawa Mukti II No.5 Jatiasih Kota Bekasi
 Telepon: (021) 8243-1220`
   },
   {
@@ -756,7 +844,7 @@ const TARGET_SISWA_FORM_FIELDS = ['Nama', 'Kelas', 'NIPD', 'JK', 'NISN', 'Tempat
 
 const TEMPLATE_SAMPLES = {
   guru: ["Contoh Nama Guru, S.Pd.", "Guru Kelas 1", ""],
-  siswa: ["Contoh Nama Siswa", "3200809988", "Jakarta", "30/12/2016", "Jl. Contoh Raya No. 10", "1", "2", "Jatiasih", "Kec. Jatiasih", "Nama Ayah Contoh", "Nama Ibu Contoh", "Kelas 1A-IBNU SINA", "TK Contoh"],
+  siswa: ["Contoh Nama Siswa", "3200809988", "Bekasi", "30/12/2016", "Jl. Contoh Raya No. 10", "1", "2", "Jatiasih", "Kec. Jatiasih", "Nama Ayah Contoh", "Nama Ibu Contoh", "Kelas 1A-IBNU SINA", "TK Contoh"],
   masuk: ["Contoh Nama Siswa Masuk", "Kelas 1A-IBNU SINA", "15/07/2024", "TK Asal Contoh", "Jl. Contoh Alamat No. 10"],
   lulusan: ["Contoh Nama Alumni", "Angkatan 2025/2026", ""],
   administrasi: ["Surat Keluar", "015/SDIT_ANNISA/VIII/2025", "10/08/2025", "Permohonan Pindah Sekolah", "Orang Tua Siswa", "", "Telah diarsipkan"],
@@ -1081,13 +1169,46 @@ function loadDatabase() {
     loadedDb.siswa = [];
   }
 
-  // Pastikan data berita selalu lengkap dan menggabungkan item tersimpan dengan DEFAULT_BERITA_LIST
-  let baseBerita = Array.isArray(loadedDb.berita) ? [...loadedDb.berita] : [];
-  DEFAULT_BERITA_LIST.forEach(def => {
-    if (!baseBerita.some(b => b && (b.judul || '').trim().toLowerCase() === (def.judul || '').trim().toLowerCase())) {
-      baseBerita.push(def);
+  // Sanitasi profil sekolah agar kota selalu Jatiasih Kota Bekasi dan alamat Jl. Wibawa Mukti II No.5 Jatiasih Kota Bekasi
+  if (loadedDb.profil) {
+    loadedDb.profil.kota = 'Jatiasih Kota Bekasi';
+    if (!loadedDb.profil.alamat || loadedDb.profil.alamat.toLowerCase().includes('jakarta') || loadedDb.profil.alamat.includes('Jl. Wibawa Mukti')) {
+      loadedDb.profil.alamat = 'Jl. Wibawa Mukti II No.5 Jatiasih Kota Bekasi';
+    }
+  } else {
+    loadedDb.profil = JSON.parse(JSON.stringify(DEFAULT_PROFIL));
+  }
+
+  // Pastikan data berita yang pernah dihapus admin TIDAK PERNAH dimuat kembali
+  let baseBerita = Array.isArray(loadedDb.berita)
+    ? loadedDb.berita.filter(b => b && b.judul && !isBeritaDeleted(b))
+    : [];
+
+  // Jika memori lokal belum pernah ada berita sama sekali dan belum pernah menghapus, gunakan DEFAULT_BERITA_LIST
+  if (!loadedDb.berita || (Array.isArray(loadedDb.berita) && loadedDb.berita.length === 0 && getDeletedBeritaTitles().length === 0)) {
+    DEFAULT_BERITA_LIST.forEach(def => {
+      if (!isBeritaDeleted(def) && !baseBerita.some(b => normalizeBeritaKey(b.judul) === normalizeBeritaKey(def.judul))) {
+        baseBerita.push(def);
+      }
+    });
+  }
+
+  // Bersihkan setiap sisa kata 'Humas SMPN 32' menjadi 'Humas Sekolah'
+  baseBerita.forEach(b => {
+    if (b.penulis) {
+      b.penulis = b.penulis.replace(/humas\s+smpn\s*32/gi, 'Humas Sekolah').replace(/smpn\s*32/gi, 'Sekolah');
+    }
+    if (b.judul) {
+      b.judul = b.judul.replace(/smpn\s*32\s*bekasi/gi, 'Sekolah').replace(/smpn\s*32/gi, 'Sekolah');
+    }
+    if (b.ringkasan) {
+      b.ringkasan = b.ringkasan.replace(/humas\s+smpn\s*32/gi, 'Humas Sekolah').replace(/smpn\s*32/gi, 'Sekolah');
+    }
+    if (b.konten) {
+      b.konten = b.konten.replace(/humas\s+smpn\s*32/gi, 'Humas Sekolah').replace(/smpn\s*32/gi, 'Sekolah');
     }
   });
+
   loadedDb.berita = baseBerita;
 
   return loadedDb;
@@ -1470,8 +1591,8 @@ function renderBeritaGrid() {
                 <i class="fa-regular fa-calendar"></i> ${esc(formatDisplayDate(item.tanggal || '12 Agustus 2026'))}
                 ${isMultiPhoto ? `<span style="margin-left:auto;color:var(--emerald);font-weight:700;"><i class="fa-solid fa-images"></i> ${photoArr.length} Foto Slide</span>` : ''}
               </div>
-              <div class="berita-title-text">${esc(item.judul)}</div>
-              <div class="berita-snippet-text">${esc(item.ringkasan || (item.konten ? item.konten.substring(0, 140) + '...' : 'Informasi dan dokumentasi kegiatan sekolah.'))}</div>
+              <div class="berita-title-text">${esc((item.judul || '').replace(/smpn\s*32\s*bekasi/gi, 'Sekolah').replace(/smpn\s*32/gi, 'Sekolah'))}</div>
+              <div class="berita-snippet-text">${esc((item.ringkasan || (item.konten ? item.konten.substring(0, 140) + '...' : 'Informasi dan dokumentasi kegiatan sekolah.')).replace(/humas\s+smpn\s*32/gi, 'Humas Sekolah').replace(/smpn\s*32/gi, 'Sekolah'))}</div>
             </div>
 
             <div class="berita-read-more-bar">
@@ -1483,7 +1604,7 @@ function renderBeritaGrid() {
         ${isAdminLoggedIn ? `
           <div style="padding:10px 16px;border-top:1px dashed var(--border);display:flex;justify-content:flex-end;gap:8px;" onclick="event.stopPropagation()">
             <button class="btn btn-secondary" style="padding:4px 8px;font-size:11px" onclick="event.stopPropagation(); openFormModalBerita(${bIdx})" title="Edit Berita"><i class="fa-solid fa-pen"></i> Edit</button>
-            <button class="btn btn-danger" style="padding:4px 8px;font-size:11px" onclick="event.stopPropagation(); deleteBerita(${bIdx})" title="Hapus Berita"><i class="fa-solid fa-trash"></i> Hapus</button>
+            <button class="btn btn-danger" style="padding:4px 8px;font-size:11px" onclick="event.stopPropagation(); deleteBerita(${bIdx})" title="Hapus Berita Secara Permanen"><i class="fa-solid fa-trash"></i> Hapus</button>
           </div>
         ` : ''}
       </div>
@@ -1563,11 +1684,20 @@ function openDetailBerita(idx) {
   // Realistis view count counter
   const viewCount = item.views || (220 + ((idx * 43) % 290));
 
-  // Penulis / Humas persis seperti screenshot ("👤 Humas SMPN 32" / sekolah)
-  const authorName = item.penulis || `Humas ${schoolName}`;
+  // Penulis / Humas persis seperti screenshot ("👤 Humas Sekolah")
+  let authorName = (item.penulis || 'Humas Sekolah').trim()
+    .replace(/humas\s+smpn\s*32/gi, 'Humas Sekolah')
+    .replace(/smpn\s*32/gi, 'Sekolah');
+  if (!authorName) authorName = 'Humas Sekolah';
+
+  const displayTitle = (item.judul || '')
+    .replace(/smpn\s*32\s*bekasi/gi, 'Sekolah')
+    .replace(/smpn\s*32/gi, 'Sekolah');
 
   // Format paragraf artikel rapi
-  const rawContent = item.konten || item.isi || item.ringkasan || 'Belum ada isi deskripsi berita yang dicantumkan.';
+  const rawContent = (item.konten || item.isi || item.ringkasan || 'Belum ada isi deskripsi berita yang dicantumkan.')
+    .replace(/humas\s+smpn\s*32/gi, 'Humas Sekolah')
+    .replace(/smpn\s*32/gi, 'Sekolah');
   const paragraphs = rawContent.split(/\n\s*\n/).filter(p => p.trim().length > 0);
   const formattedContentHtml = paragraphs.length > 0
     ? paragraphs.map(p => `<p>${esc(p.trim()).replace(/\n/g, '<br>')}</p>`).join('')
@@ -1595,12 +1725,12 @@ function openDetailBerita(idx) {
     <div class="portal-layout">
       <!-- Kolom Kiri: Halaman Berita Penuh -->
       <article class="portal-main-article">
-        <h1 class="portal-article-title">${esc(item.judul)}</h1>
+        <h1 class="portal-article-title">${esc(displayTitle)}</h1>
 
-        <!-- Foto Utama (Featured Photo Card) -->
+        <!-- Foto Utama (Featured Photo Slide) -->
         <div class="portal-article-media">
           <div class="portal-featured-card">
-            <img id="portalDetailMainImg" src="${esc(currentDetailBeritaPhotos[0])}" class="portal-featured-img" alt="${esc(item.judul)}" onerror="this.src='https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=800&q=80'">
+            <img id="portalDetailMainImg" src="${esc(currentDetailBeritaPhotos[0])}" class="portal-featured-img" alt="${esc(displayTitle)}" onerror="this.src='https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=800&q=80'">
             ${hasMultiplePhotos ? `
               <button class="portal-slide-nav prev" onclick="movePortalDetailSlide(-1)" title="Foto Sebelumnya">
                 <i class="fa-solid fa-chevron-left"></i>
@@ -1611,29 +1741,13 @@ function openDetailBerita(idx) {
               <div class="portal-slide-badge">
                 <span id="portalDetailSlideCounter">1</span> / ${currentDetailBeritaPhotos.length} Foto
               </div>
-            ` : ''}
-          </div>
-
-          <!-- Foto Model Kartu jika Foto Banyak -->
-          ${hasMultiplePhotos ? `
-            <div class="portal-photo-cards-wrapper">
-              <div class="portal-photo-cards-title">
-                <i class="fa-solid fa-grip" style="color:var(--primary)"></i>
-                <span>Galeri Dokumentasi Foto (${currentDetailBeritaPhotos.length} Foto)</span>
-                <small style="font-weight:normal;color:var(--text-muted);margin-left:auto;">
-                  <i class="fa-solid fa-hand-pointer"></i> Klik kartu foto untuk melihat
-                </small>
-              </div>
-              <div class="portal-photo-cards-grid">
-                ${currentDetailBeritaPhotos.map((pUrl, pIdx) => `
-                  <div class="portal-photo-card ${pIdx === 0 ? 'active' : ''}" id="portalPhotoCard_${pIdx}" onclick="setPortalDetailSlide(${pIdx})" title="Lihat Foto #${pIdx + 1}">
-                    <img src="${esc(pUrl)}" alt="Foto ${pIdx + 1}" onerror="this.src='https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=600&q=80'">
-                    <div class="portal-photo-card-tag">Foto #${pIdx + 1}</div>
-                  </div>
+              <div class="berita-slide-dots" id="portalDetailDots" style="bottom:16px;">
+                ${currentDetailBeritaPhotos.map((_, pIdx) => `
+                  <span class="berita-slide-dot ${pIdx === 0 ? 'active' : ''}" onclick="setPortalDetailSlide(${pIdx})" title="Foto ${pIdx + 1}"></span>
                 `).join('')}
               </div>
-            </div>
-          ` : ''}
+            ` : ''}
+          </div>
         </div>
 
         <!-- Meta Bar (Penulis, Tanggal, Dibaca) seperti referensi -->
@@ -1667,7 +1781,15 @@ function openDetailBerita(idx) {
             </div>
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;">
-            <button type="button" class="btn btn-secondary" style="padding:8px 14px;font-size:12px;" onclick="copyBeritaLink('${esc(item.judul)}')">
+            ${isAdminLoggedIn ? `
+              <button type="button" class="btn btn-danger" style="padding:8px 14px;font-size:12px;" onclick="deleteBeritaFromDetail(${idx})" title="Hapus Berita Ini Secara Permanen">
+                <i class="fa-solid fa-trash"></i> Hapus
+              </button>
+              <button type="button" class="btn btn-secondary" style="padding:8px 14px;font-size:12px;" onclick="openFormModalBerita(${idx})" title="Edit Berita Ini">
+                <i class="fa-solid fa-pen"></i> Edit
+              </button>
+            ` : ''}
+            <button type="button" class="btn btn-secondary" style="padding:8px 14px;font-size:12px;" onclick="copyBeritaLink('${esc(displayTitle)}')">
               <i class="fa-solid fa-share-nodes"></i> Bagikan
             </button>
             <button type="button" class="btn btn-emerald" style="padding:8px 14px;font-size:12px;" onclick="printDetailBerita(${idx})">
@@ -1693,15 +1815,18 @@ function openDetailBerita(idx) {
                 : (other.foto ? [other.foto] : ['https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=600&q=80']);
               const thumbSrc = otherPhotos[0];
               const isCurrent = oIdx === idx;
+              const otherTitle = (other.judul || '')
+                .replace(/smpn\s*32\s*bekasi/gi, 'Sekolah')
+                .replace(/smpn\s*32/gi, 'Sekolah');
 
               return `
-                <div class="portal-recent-item ${isCurrent ? 'current-active' : ''}" onclick="openDetailBerita(${oIdx})" title="Buka artikel: ${esc(other.judul)}">
+                <div class="portal-recent-item ${isCurrent ? 'current-active' : ''}" onclick="openDetailBerita(${oIdx})" title="Buka artikel: ${esc(otherTitle)}">
                   <div class="portal-recent-thumb-frame">
-                    <img src="${esc(thumbSrc)}" alt="${esc(other.judul)}" onerror="this.src='https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=600&q=80'">
+                    <img src="${esc(thumbSrc)}" alt="${esc(otherTitle)}" onerror="this.src='https://images.unsplash.com/photo-1577896851231-70ef18881754?auto=format&fit=crop&w=600&q=80'">
                     ${isCurrent ? '<span class="current-reading-chip">SEDANG DIBACA</span>' : ''}
                   </div>
                   <div class="portal-recent-info">
-                    <div class="portal-recent-title">${esc(other.judul)}</div>
+                    <div class="portal-recent-title">${esc(otherTitle)}</div>
                     <div class="portal-recent-date">
                       <i class="fa-regular fa-clock"></i> ${esc(formatDisplayDate(other.tanggal || 'Terbaru'))}
                     </div>
@@ -1736,10 +1861,13 @@ function setPortalDetailSlide(slideIdx) {
     counter.textContent = currentDetailBeritaSlide + 1;
   }
 
-  const cards = document.querySelectorAll('.portal-photo-card');
-  cards.forEach((card, idx) => {
-    card.classList.toggle('active', idx === currentDetailBeritaSlide);
-  });
+  const dotsContainer = document.getElementById('portalDetailDots');
+  if (dotsContainer) {
+    const dots = Array.from(dotsContainer.children);
+    dots.forEach((dot, idx) => {
+      dot.classList.toggle('active', idx === currentDetailBeritaSlide);
+    });
+  }
 }
 
 function movePortalDetailSlide(direction) {
@@ -1993,18 +2121,42 @@ function deleteBerita(idx) {
     return;
   }
 
-  if (confirm('Apakah Anda yakin ingin menghapus berita ini?')) {
-    if (db.berita && db.berita[idx]) {
-       const b = db.berita[idx];
-       if (b.fotos) b.fotos.forEach(fUrl => {
-          if (fUrl.includes('drive.google.com')) deleteFileFromCloudByUrl(fUrl);
-       });
-       if (b.foto && b.foto.includes('drive.google.com')) deleteFileFromCloudByUrl(b.foto);
+  const bList = (db && Array.isArray(db.berita) && db.berita.length > 0) ? db.berita : DEFAULT_BERITA_LIST;
+  const itemToDelete = bList[idx];
+  if (!itemToDelete) return;
+
+  const itemTitle = itemToDelete.judul || 'berita ini';
+  if (confirm(`Apakah Anda yakin ingin menghapus "${itemTitle}" secara permanen?`)) {
+    // 1. Catat ke sistem filter permanen
+    recordDeletedBerita(itemToDelete.judul);
+
+    // 2. Hapus file Google Drive jika ada
+    if (itemToDelete.fotos && Array.isArray(itemToDelete.fotos)) {
+      itemToDelete.fotos.forEach(fUrl => {
+        if (fUrl && fUrl.includes('drive.google.com')) deleteFileFromCloudByUrl(fUrl);
+      });
     }
-    db.berita.splice(idx, 1);
+    if (itemToDelete.foto && itemToDelete.foto.includes('drive.google.com')) {
+      deleteFileFromCloudByUrl(itemToDelete.foto);
+    }
+
+    // 3. Pastikan db.berita terisi dan buang item yang dihapus (termasuk duplikasi judul yang sama)
+    if (!Array.isArray(db.berita)) {
+      db.berita = [...bList];
+    }
+    db.berita = db.berita.filter(b => !isBeritaDeleted(b));
+
+    // 4. Simpan ke localStorage & sync ke Google Sheets Cloud
     saveDatabase();
+
+    // 5. Render ulang tampilan grid dashboard
     renderBeritaGrid();
   }
+}
+
+function deleteBeritaFromDetail(idx) {
+  deleteBerita(idx);
+  backToDashboard();
 }
 
 // PROFIL SEKOLAH RENDER ENGINE & INSTANT PREVIEW FOTO KEPALA SEKOLAH
@@ -2015,7 +2167,7 @@ function renderProfilView() {
   document.getElementById('viewTaglineSekolah').textContent = p.tagline;
   document.getElementById('viewAkreditasi').textContent = p.akreditasi;
   document.getElementById('viewNPSN').textContent = p.npsn || '20231556';
-  document.getElementById('viewKota').textContent = p.kota || 'Jakarta';
+  document.getElementById('viewKota').textContent = 'Jatiasih Kota Bekasi';
 
   document.getElementById('viewNamaKepala').textContent = p.namaKepala || 'Abdul Yakub, S.Ag';
   document.getElementById('viewJabatanKepala').textContent = p.jabatanKepala || 'Kepala Sekolah SDIT ANNISA';
@@ -2035,7 +2187,7 @@ function renderProfilView() {
   }
 
   document.getElementById('viewNamaLengkap').textContent = p.namaLengkap;
-  document.getElementById('viewAlamat').textContent = p.alamat;
+  document.getElementById('viewAlamat').textContent = (p.alamat && !p.alamat.toLowerCase().includes('jakarta')) ? p.alamat : 'Jl. Wibawa Mukti II No.5 Jatiasih Kota Bekasi';
   document.getElementById('viewTelepon').textContent = p.telepon;
   document.getElementById('viewEmail').textContent = p.email;
 
@@ -2107,7 +2259,7 @@ function saveProfilEdits(e) {
     tagline: db.profil.tagline || DEFAULT_PROFIL.tagline,
     akreditasi: document.getElementById('editAkreditasi').value,
     npsn: document.getElementById('editNPSN').value,
-    kota: db.profil.kota || DEFAULT_PROFIL.kota,
+    kota: 'Jatiasih Kota Bekasi',
     namaKepala: document.getElementById('editNamaKepala').value,
     jabatanKepala: document.getElementById('editJabatanKepala').value,
     fotoKepala: finalFotoKepala,
