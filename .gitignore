@@ -1,0 +1,6 @@
+powershell.cmd
+data/
+__pycache__/
+*.pyc
+dist/
+build/
